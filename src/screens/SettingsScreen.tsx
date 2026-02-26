@@ -1,0 +1,453 @@
+import React, { useState } from 'react';
+import {
+    View, Text, TextInput, TouchableOpacity, StyleSheet,
+    ScrollView, Alert, ActivityIndicator, Image,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import * as ImagePicker from 'expo-image-picker';
+import { useAuth } from '../contexts/AuthContext';
+import { useTheme } from '../contexts/ThemeContext';
+import { supabase } from '../lib/supabase';
+import { SPACING, BORDER_RADIUS } from '../constants/theme';
+
+export default function SettingsScreen() {
+    const { user, profile, signOut, updateProfile, refreshProfile } = useAuth();
+    const { colors, isDark, toggleTheme } = useTheme();
+    const styles = createStyles(colors);
+    const [weight, setWeight] = useState(profile?.current_weight_kg?.toString() || '');
+    const [saving, setSaving] = useState(false);
+    const [uploading, setUploading] = useState(false);
+    const [birthDate, setBirthDate] = useState(() => {
+        if (!profile?.birth_date) return '';
+        const [y, m, d] = profile.birth_date.split('-');
+        return `${d}/${m}/${y}`;
+    });
+
+    const calculateAge = (dateStr: string) => {
+        if (dateStr.length < 10) return null;
+        const [day, month, year] = dateStr.split('/').map(Number);
+        if (isNaN(day) || isNaN(month) || isNaN(year)) return null;
+        const birth = new Date(year, month - 1, day);
+        const today = new Date();
+        let age = today.getFullYear() - birth.getFullYear();
+        const m = today.getMonth() - birth.getMonth();
+        if (m < 0 || (m === 0 && today.getDate() < birth.getDate())) {
+            age--;
+        }
+        return age;
+    };
+
+    // Password change
+    const [newPassword, setNewPassword] = useState('');
+    const [changingPassword, setChangingPassword] = useState(false);
+
+    const handleSaveWeight = async () => {
+        const w = parseFloat(weight);
+        if (isNaN(w)) return;
+
+        let ageUpdate = {};
+        let birthUpdate = {};
+
+        if (birthDate.length === 10) {
+            const [d, m, y] = birthDate.split('/');
+            birthUpdate = { birth_date: `${y}-${m}-${d}` };
+            const age = calculateAge(birthDate);
+            if (age !== null) ageUpdate = { age };
+        }
+
+        setSaving(true);
+        await updateProfile({
+            current_weight_kg: w,
+            ...birthUpdate,
+            ...ageUpdate
+        });
+        setSaving(false);
+        Alert.alert('✅ Profil mis à jour');
+    };
+
+    const handlePickAvatar = async () => {
+        try {
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ['images'],
+                allowsEditing: true,
+                aspect: [1, 1],
+                quality: 0.7,
+            });
+
+            if (result.canceled || !result.assets[0]) return;
+
+            setUploading(true);
+            const uri = result.assets[0].uri;
+            const ext = uri.split('.').pop() || 'jpg';
+            const fileName = `${user?.id}/avatar.${ext}`;
+
+            // Convert to blob
+            const response = await fetch(uri);
+            const blob = await response.blob();
+            const arrayBuffer = await new Response(blob).arrayBuffer();
+
+            const { error } = await supabase.storage
+                .from('avatars')
+                .upload(fileName, arrayBuffer, {
+                    contentType: `image/${ext}`,
+                    upsert: true,
+                });
+
+            if (error) throw error;
+
+            const { data: urlData } = supabase.storage
+                .from('avatars')
+                .getPublicUrl(fileName);
+
+            // Add cache buster to URL
+            const avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+            await updateProfile({ avatar_url: avatarUrl });
+            setUploading(false);
+            Alert.alert('✅ Photo mise à jour');
+        } catch (err: any) {
+            setUploading(false);
+            Alert.alert('Erreur', err.message);
+        }
+    };
+
+    const handleChangePassword = async () => {
+        if (newPassword.length < 6) {
+            Alert.alert('Erreur', 'Le mot de passe doit contenir au moins 6 caractères.');
+            return;
+        }
+        setChangingPassword(true);
+        const { error } = await supabase.auth.updateUser({ password: newPassword });
+        setChangingPassword(false);
+        if (error) {
+            Alert.alert('Erreur', error.message);
+        } else {
+            setNewPassword('');
+            Alert.alert('✅ Mot de passe changé');
+        }
+    };
+
+    const handleSignOut = () => {
+        Alert.alert('Déconnexion', 'Tu es sûr de vouloir te déconnecter ?', [
+            { text: 'Annuler', style: 'cancel' },
+            { text: 'Déconnexion', onPress: signOut },
+        ]);
+    };
+
+    const handleDeleteAccount = () => {
+        Alert.alert(
+            '⚠️ Supprimer le compte',
+            'Cette action est IRRÉVERSIBLE. Toutes tes données seront définitivement supprimées.',
+            [
+                { text: 'Annuler', style: 'cancel' },
+                {
+                    text: 'Supprimer définitivement',
+                    style: 'destructive',
+                    onPress: async () => {
+                        try {
+                            // Delete user profile (cascades to all data)
+                            if (user) {
+                                await supabase.from('users').delete().eq('id', user.id);
+                                // Delete auth user
+                                await supabase.auth.admin.deleteUser(user.id);
+                            }
+                            await signOut();
+                        } catch (err: any) {
+                            // Fallback: sign out even if delete fails
+                            await signOut();
+                        }
+                    },
+                },
+            ],
+        );
+    };
+
+    return (
+        <LinearGradient colors={[colors.background, isDark ? '#0D0D2B' : colors.cardLight]} style={styles.container}>
+            <ScrollView contentContainerStyle={styles.scroll}>
+                <Text style={[styles.title, { color: colors.text }]}>⚙️ Paramètres</Text>
+
+                {/* Theme Section */}
+                <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Text style={[styles.sectionTitle, { color: colors.primary }]}>Apparence</Text>
+                    <View style={styles.infoRow}>
+                        <Text style={[styles.infoLabel, { color: colors.textSecondary }]}>Mode Clair (Force White)</Text>
+                        <TouchableOpacity
+                            style={[styles.themeToggle, !isDark && styles.themeToggleActive]}
+                            onPress={toggleTheme}
+                        >
+                            <View style={[styles.themeToggleCircle, !isDark && styles.themeToggleCircleActive]} />
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                {/* Profile Section */}
+                <View style={[styles.section, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                    <Text style={[styles.sectionTitle, { color: colors.primary }]}>Profil</Text>
+
+                    {/* Avatar */}
+                    <TouchableOpacity style={styles.avatarContainer} onPress={handlePickAvatar} disabled={uploading}>
+                        {profile?.avatar_url ? (
+                            <Image
+                                source={{ uri: profile.avatar_url }}
+                                style={styles.avatar}
+                                onError={(e) => console.log("Avatar image error:", e.nativeEvent.error)}
+                            />
+                        ) : (
+                            <View style={styles.avatarPlaceholder}>
+                                <Text style={styles.avatarText}>
+                                    {profile?.username?.charAt(0).toUpperCase() || '?'}
+                                </Text>
+                            </View>
+                        )}
+                        {uploading ? (
+                            <ActivityIndicator color={colors.primary} style={styles.avatarOverlay} />
+                        ) : (
+                            <View style={styles.avatarBadge}>
+                                <Text style={styles.avatarBadgeText}>📷</Text>
+                            </View>
+                        )}
+                    </TouchableOpacity>
+
+                    <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Pseudo</Text>
+                        <Text style={styles.infoValue}>{profile?.username || '—'}</Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Âge (calculé)</Text>
+                        <Text style={styles.infoValue}>{profile?.age ? `${profile.age} ans` : '—'}</Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Niveau</Text>
+                        <Text style={styles.infoValue}>
+                            {profile?.experience_level === 'beginner' ? '🐣 Débutant' :
+                                profile?.experience_level === 'novice' ? '💪 Novice' :
+                                    profile?.experience_level === 'experienced' ? '🏆 Expérimenté' : '—'}
+                        </Text>
+                    </View>
+
+                    <View style={styles.infoRow}>
+                        <Text style={styles.infoLabel}>Sexe</Text>
+                        <View style={styles.genderToggle}>
+                            <TouchableOpacity
+                                disabled={saving}
+                                style={[styles.genderMiniBtn, profile?.gender === 'male' && styles.genderMiniBtnActive]}
+                                onPress={async () => {
+                                    setSaving(true);
+                                    const { error } = await updateProfile({ gender: 'male' });
+                                    setSaving(false);
+                                    if (error) Alert.alert('Erreur', error.message);
+                                }}
+                            >
+                                <Text style={styles.genderMiniText}>👨 H</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                disabled={saving}
+                                style={[styles.genderMiniBtn, profile?.gender === 'female' && styles.genderMiniBtnActive]}
+                                onPress={async () => {
+                                    setSaving(true);
+                                    const { error } = await updateProfile({ gender: 'female' });
+                                    setSaving(false);
+                                    if (error) Alert.alert('Erreur', error.message);
+                                }}
+                            >
+                                <Text style={styles.genderMiniText}>👩 F</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+
+                {/* Info Physiques Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Infos Physiques</Text>
+
+                    <Text style={styles.infoLabel}>Date de naissance (JJ/MM/AAAA)</Text>
+                    <TextInput
+                        style={[styles.input, { marginTop: 8 }]}
+                        value={birthDate}
+                        onChangeText={(text) => {
+                            let cleaned = text.replace(/\D/g, '');
+                            let formatted = cleaned;
+                            if (cleaned.length > 2) formatted = cleaned.slice(0, 2) + '/' + cleaned.slice(2);
+                            if (cleaned.length > 4) formatted = formatted.slice(0, 5) + '/' + cleaned.slice(4, 8);
+                            setBirthDate(formatted);
+                        }}
+                        placeholder="01/01/2000"
+                        placeholderTextColor={colors.textMuted}
+                        keyboardType="numeric"
+                        maxLength={10}
+                    />
+
+                    <Text style={[styles.infoLabel, { marginTop: 8 }]}>Poids corporel (kg)</Text>
+                    <View style={styles.weightRow}>
+                        <TextInput
+                            style={styles.weightInput}
+                            value={weight}
+                            onChangeText={setWeight}
+                            keyboardType="numeric"
+                            placeholder="75"
+                            placeholderTextColor={colors.textMuted}
+                        />
+                        <TouchableOpacity style={styles.weightSave} onPress={handleSaveWeight} disabled={saving}>
+                            {saving ? (
+                                <ActivityIndicator size="small" color={colors.text} />
+                            ) : (
+                                <Text style={styles.weightSaveText}>💾</Text>
+                            )}
+                        </TouchableOpacity>
+                    </View>
+                </View>
+
+                {/* Password Section */}
+                <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Mot de passe</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Nouveau mot de passe"
+                        placeholderTextColor={colors.textMuted}
+                        value={newPassword}
+                        onChangeText={setNewPassword}
+                        secureTextEntry
+                    />
+                    <TouchableOpacity
+                        style={styles.changePasswordButton}
+                        onPress={handleChangePassword}
+                        disabled={changingPassword || !newPassword}
+                    >
+                        {changingPassword ? (
+                            <ActivityIndicator color={colors.text} />
+                        ) : (
+                            <Text style={styles.changePasswordText}>Changer le mot de passe</Text>
+                        )}
+                    </TouchableOpacity>
+                </View>
+
+                {/* Actions */}
+                <View style={styles.section}>
+                    <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>
+                        <Text style={styles.logoutText}>🚪 Se déconnecter</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
+                        <Text style={styles.deleteText}>🗑 Supprimer mon compte</Text>
+                    </TouchableOpacity>
+                </View>
+
+                <Text style={styles.footerBranding}>Product By Thomas Shamoev</Text>
+            </ScrollView>
+        </LinearGradient>
+    );
+}
+
+const createStyles = (colors: any) => StyleSheet.create({
+    container: { flex: 1 },
+    scroll: { padding: SPACING.lg, paddingTop: 60, paddingBottom: 100 },
+    title: { fontSize: 26, fontWeight: '800', color: colors.text, marginBottom: SPACING.lg },
+    section: {
+        backgroundColor: colors.card, borderRadius: BORDER_RADIUS.md,
+        padding: SPACING.lg, marginBottom: SPACING.md,
+        borderWidth: 1, borderColor: colors.border,
+    },
+    sectionTitle: {
+        color: colors.textSecondary, fontSize: 13, fontWeight: '700',
+        textTransform: 'uppercase', letterSpacing: 1, marginBottom: SPACING.md,
+    },
+    avatarContainer: { alignSelf: 'center', marginBottom: SPACING.lg },
+    avatar: { width: 100, height: 100, borderRadius: 50 },
+    avatarPlaceholder: {
+        width: 100, height: 100, borderRadius: 50,
+        backgroundColor: colors.primary, justifyContent: 'center', alignItems: 'center',
+    },
+    avatarText: { fontSize: 40, fontWeight: '800', color: colors.text },
+    avatarOverlay: { position: 'absolute', top: 35, left: 35 },
+    avatarBadge: {
+        position: 'absolute', bottom: 0, right: 0,
+        backgroundColor: colors.card, borderRadius: 15,
+        width: 30, height: 30, justifyContent: 'center', alignItems: 'center',
+        borderWidth: 2, borderColor: colors.border,
+    },
+    avatarBadgeText: { fontSize: 14 },
+    infoRow: {
+        flexDirection: 'row', justifyContent: 'space-between',
+        paddingVertical: SPACING.sm, borderBottomWidth: 1,
+        borderBottomColor: colors.border + '40',
+    },
+    infoLabel: { color: colors.textSecondary, fontSize: 15 },
+    infoValue: { color: colors.text, fontSize: 15, fontWeight: '600' },
+    weightRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
+    weightInput: {
+        flex: 1, backgroundColor: colors.backgroundLight,
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
+        color: colors.text, fontSize: 20, fontWeight: '700',
+        borderWidth: 1, borderColor: colors.border,
+    },
+    weightUnit: { color: colors.textSecondary, fontSize: 16, fontWeight: '600' },
+    weightSave: {
+        backgroundColor: colors.primary, width: 48, height: 48,
+        borderRadius: BORDER_RADIUS.full, justifyContent: 'center', alignItems: 'center',
+    },
+    weightSaveText: { fontSize: 20 },
+    input: {
+        backgroundColor: colors.backgroundLight,
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
+        color: colors.text, fontSize: 16, marginBottom: SPACING.md,
+        borderWidth: 1, borderColor: colors.border,
+    },
+    changePasswordButton: {
+        backgroundColor: colors.primary, borderRadius: BORDER_RADIUS.sm,
+        paddingVertical: SPACING.sm, alignItems: 'center',
+    },
+    changePasswordText: { color: colors.text, fontSize: 14, fontWeight: '600' },
+    logoutButton: {
+        backgroundColor: colors.backgroundLight,
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
+        alignItems: 'center', marginBottom: SPACING.md,
+    },
+    logoutText: { color: colors.text, fontSize: 16, fontWeight: '600' },
+    deleteButton: {
+        backgroundColor: colors.error + '20',
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
+        alignItems: 'center', borderWidth: 1, borderColor: colors.error + '40',
+    },
+    deleteText: { color: colors.error, fontSize: 16, fontWeight: '600' },
+    genderToggle: { flexDirection: 'row', gap: SPACING.xs },
+    genderMiniBtn: {
+        paddingHorizontal: 8,
+        paddingVertical: 4,
+        borderRadius: 4,
+        borderWidth: 1,
+        borderColor: colors.border,
+    },
+    genderMiniBtnActive: {
+        backgroundColor: colors.primary,
+        borderColor: colors.primary,
+    },
+    genderMiniText: {
+        color: colors.text,
+        fontSize: 12,
+        fontWeight: '600',
+    },
+    themeToggle: {
+        width: 50,
+        height: 28,
+        borderRadius: 14,
+        backgroundColor: colors.border,
+        padding: 2,
+        justifyContent: 'center',
+    },
+    themeToggleActive: {
+        backgroundColor: colors.primary + '40',
+    },
+    themeToggleCircle: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        backgroundColor: colors.textMuted,
+    },
+    themeToggleCircleActive: {
+        alignSelf: 'flex-end',
+        backgroundColor: colors.primary,
+    },
+    footerBranding: { textAlign: 'center', color: colors.textMuted, fontSize: 12, fontWeight: '600', marginTop: SPACING.xl, opacity: 0.6 },
+});
