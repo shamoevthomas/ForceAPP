@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
     ScrollView, Alert, ActivityIndicator, Modal, FlatList,
+    Switch,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -37,6 +38,7 @@ interface ExerciseInput {
 interface DayInput {
     day_label: string;
     weekday_number: number;
+    is_rest_day: boolean;
     exercises: ExerciseInput[];
 }
 
@@ -64,20 +66,38 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
 
     useEffect(() => {
         if (initialData && initialData.program_days) {
-            const formattedDays = initialData.program_days.map(d => ({
-                day_label: d.day_label || '',
-                weekday_number: d.day_number,
-                exercises: d.exercises.map((e: any) => ({
-                    name: e.name,
-                    target_sets: String(e.target_sets),
-                    target_reps: String(e.target_reps),
-                    current_weight_kg: String(e.current_weight_kg),
-                    weight_increment: e.weight_increment,
-                }))
-            }));
-            setDays(formattedDays);
+            const daysMap = new Map();
+            initialData.program_days.forEach(d => {
+                daysMap.set(d.day_number, {
+                    day_label: d.day_label || '',
+                    weekday_number: d.day_number,
+                    is_rest_day: !!d.is_rest_day,
+                    exercises: (d.exercises || []).map((e: any) => ({
+                        name: e.name,
+                        target_sets: String(e.target_sets),
+                        target_reps: String(e.target_reps),
+                        current_weight_kg: String(e.current_weight_kg),
+                        weight_increment: e.weight_increment,
+                    }))
+                });
+            });
+
+            const fullWeek = WEEKDAYS.map(w => {
+                return daysMap.get(w.id) || {
+                    day_label: '',
+                    weekday_number: w.id,
+                    is_rest_day: true,
+                    exercises: [defaultExercise()]
+                };
+            });
+            setDays(fullWeek);
         } else {
-            setDays([{ day_label: 'Push', weekday_number: 1, exercises: [defaultExercise()] }]);
+            setDays(WEEKDAYS.map(w => ({
+                day_label: '',
+                weekday_number: w.id,
+                is_rest_day: w.id > 5, // Default rest on Sat/Sun
+                exercises: [defaultExercise()],
+            })));
         }
     }, [initialData]);
 
@@ -108,27 +128,11 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
         if (data) setHasExistingProgram(true);
     };
 
-    const addDay = () => {
-        const usedWeekdays = days.map(d => d.weekday_number);
-        let nextDay = 1;
-        for (let i = 1; i <= 7; i++) {
-            if (!usedWeekdays.includes(i)) {
-                nextDay = i;
-                break;
-            }
-        }
-
-        setDays([...days, {
-            day_label: '',
-            weekday_number: nextDay,
-            exercises: [defaultExercise()],
-        }]);
-    };
-
-    const removeDay = (index: number) => {
-        if (days.length <= 1) return;
-        setDays(days.filter((_, i) => i !== index));
-    };
+    // Fixed 7-day layout, removal and manual addition of days are disabled
+    /*
+    const addDay = () => { ... }
+    const removeDay = (index: number) => { ... }
+    */
 
     const openDayPicker = (index: number) => {
         setActiveDayIndex(index);
@@ -240,14 +244,19 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                     messages: [
                         {
                             role: "system",
-                            content: `Tu es un assistant expert en musculation et vision. Ton unique but est de renvoyer du JSON valide.
+                            content: `Tu es un assistant expert en musculation et vision. Ton unique but est de renvoyer du JSON valide représentant un programme sur les 7 jours de la semaine (1=Lundi, 7=Dimanche).
+                            
+                            IMPORTANT : Tu DOIS renvoyer un objet pour CHAQUE jour de la semaine (7 jours au total).
+                            Si un jour n'est pas mentionné dans l'image ou s'il est explicitement écrit "Repos", "Rest", "Break", alors marque "is_rest_day": true.
+                            
                             Structure attendue :
                             {
                               "program_name": "...",
                               "program": [
                                 {
                                   "day_label": "Sous-titre de la séance (ex: Push, Pull, Leg Day)",
-                                  "weekday_number": 1-7 (1=Lundi, 7=Dimanche),
+                                  "weekday_number": 1-7,
+                                  "is_rest_day": boolean,
                                   "exercises": [
                                     { "name": "...", "sets": 4, "reps": 12, "weight": 0 }
                                   ]
@@ -286,6 +295,7 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
             const formattedDays = (data.program || []).map((d: any, i: number) => ({
                 day_label: d.day_label || '',
                 weekday_number: parseInt(d.weekday_number) || (i + 1),
+                is_rest_day: !!d.is_rest_day,
                 exercises: (d.exercises || []).map((e: any) => ({
                     name: e.name || 'Inconnu',
                     target_sets: String(e.sets || 4),
@@ -295,7 +305,18 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                 })),
             }));
 
-            if (formattedDays.length > 0) setDays(formattedDays);
+            // Ensure all 7 days are present after scan
+            const completeProgram = WEEKDAYS.map(w => {
+                const scannedDay = formattedDays.find((d: any) => d.weekday_number === w.id);
+                return scannedDay || {
+                    day_label: '',
+                    weekday_number: w.id,
+                    is_rest_day: true,
+                    exercises: [defaultExercise()]
+                };
+            });
+
+            setDays(completeProgram);
 
             setScanning(false);
             setScanModal(false);
@@ -348,21 +369,28 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
             for (const day of days) {
                 const { data: programDay, error: dayError } = await supabase
                     .from('program_days')
-                    .insert({ program_id: programId, day_number: day.weekday_number, day_label: day.day_label })
+                    .insert({
+                        program_id: programId,
+                        day_number: day.weekday_number,
+                        day_label: day.day_label,
+                        is_rest_day: day.is_rest_day
+                    })
                     .select().single();
                 if (dayError) throw dayError;
 
-                const exercises = day.exercises.map((ex, j) => ({
-                    program_day_id: programDay.id,
-                    name: ex.name,
-                    target_sets: parseInt(ex.target_sets) || 4,
-                    target_reps: parseInt(ex.target_reps) || 12,
-                    current_weight_kg: parseFloat(ex.current_weight_kg) || 0,
-                    weight_increment: ex.weight_increment,
-                    sort_order: j,
-                }));
-                const { error: exError } = await supabase.from('exercises').insert(exercises);
-                if (exError) throw exError;
+                if (!day.is_rest_day) {
+                    const exercises = day.exercises.map((ex, j) => ({
+                        program_day_id: programDay.id,
+                        name: ex.name,
+                        target_sets: parseInt(ex.target_sets) || 4,
+                        target_reps: parseInt(ex.target_reps) || 12,
+                        current_weight_kg: parseFloat(ex.current_weight_kg) || 0,
+                        weight_increment: ex.weight_increment,
+                        sort_order: j,
+                    }));
+                    const { error: exError } = await supabase.from('exercises').insert(exercises);
+                    if (exError) throw exError;
+                }
             }
 
             onComplete();
@@ -403,55 +431,68 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                 {days.map((day, dayIndex) => (
                     <View key={dayIndex} style={styles.dayCard}>
                         <View style={styles.dayTopRow}>
-                            <TouchableOpacity style={styles.dayPickerBtn} onPress={() => openDayPicker(dayIndex)}>
+                            <View style={[styles.dayPickerBtn, { backgroundColor: colors.background }]}>
                                 <Text style={styles.dayPickerLabel}>Jour</Text>
-                                <Text style={styles.dayPickerValue}>{WEEKDAYS.find(w => w.id === day.weekday_number)?.label || 'Choisir'}</Text>
-                            </TouchableOpacity>
+                                <Text style={styles.dayPickerValue}>{WEEKDAYS.find(w => w.id === day.weekday_number)?.label}</Text>
+                            </View>
                             <TextInput
-                                style={styles.subtitleInput}
+                                style={[styles.subtitleInput, day.is_rest_day && { opacity: 0.5 }]}
                                 value={day.day_label}
                                 onChangeText={(v) => updateDay(dayIndex, 'day_label', v)}
-                                placeholder="Sous-titre (ex: Push)"
+                                placeholder={day.is_rest_day ? "Repos" : "Sous-titre (ex: Push)"}
                                 placeholderTextColor={colors.textMuted}
+                                editable={!day.is_rest_day}
                             />
-                            <TouchableOpacity style={styles.removeDayBtn} onPress={() => removeDay(dayIndex)}>
-                                <Text style={styles.removeDayText}>✕</Text>
-                            </TouchableOpacity>
+                            <View style={styles.restToggleContainer}>
+                                <Text style={styles.restToggleLabel}>Repos</Text>
+                                <Switch
+                                    value={day.is_rest_day}
+                                    onValueChange={(v) => updateDay(dayIndex, 'is_rest_day', v)}
+                                    trackColor={{ false: colors.border, true: colors.primary + '80' }}
+                                    thumbColor={day.is_rest_day ? colors.primary : '#f4f3f4'}
+                                />
+                            </View>
                         </View>
 
-                        {day.exercises.map((ex, exIndex) => (
-                            <View key={exIndex} style={styles.exerciseCard}>
-                                <View style={styles.exerciseHeader}>
-                                    <TextInput style={styles.exerciseNameInput} placeholder="Nom de l'exercice" value={ex.name} onChangeText={(v) => updateExercise(dayIndex, exIndex, 'name', v)} placeholderTextColor={colors.textMuted} />
-                                    <TouchableOpacity onPress={() => removeExercise(dayIndex, exIndex)}><Text style={styles.deleteExText}>✕</Text></TouchableOpacity>
-                                </View>
-                                <View style={styles.exerciseRow}>
-                                    <View style={styles.miniField}>
-                                        <Text style={styles.miniLabel}>Sets</Text>
-                                        <TextInput style={styles.miniInput} value={ex.target_sets} onChangeText={(v) => updateExercise(dayIndex, exIndex, 'target_sets', v)} keyboardType="numeric" />
+                        {!day.is_rest_day && (
+                            <>
+
+                                {day.exercises.map((ex, exIndex) => (
+                                    <View key={exIndex} style={styles.exerciseCard}>
+                                        <View style={styles.exerciseHeader}>
+                                            <TextInput style={styles.exerciseNameInput} placeholder="Nom de l'exercice" value={ex.name} onChangeText={(v) => updateExercise(dayIndex, exIndex, 'name', v)} placeholderTextColor={colors.textMuted} />
+                                            <TouchableOpacity onPress={() => removeExercise(dayIndex, exIndex)}><Text style={styles.deleteExText}>✕</Text></TouchableOpacity>
+                                        </View>
+                                        <View style={styles.exerciseRow}>
+                                            <View style={styles.miniField}>
+                                                <Text style={styles.miniLabel}>Sets</Text>
+                                                <TextInput style={styles.miniInput} value={ex.target_sets} onChangeText={(v) => updateExercise(dayIndex, exIndex, 'target_sets', v)} keyboardType="numeric" />
+                                            </View>
+                                            <View style={styles.miniField}>
+                                                <Text style={styles.miniLabel}>Reps</Text>
+                                                <TextInput style={styles.miniInput} value={ex.target_reps} onChangeText={(v) => updateExercise(dayIndex, exIndex, 'target_reps', v)} keyboardType="numeric" />
+                                            </View>
+                                            <View style={[styles.field, { flex: 2 }]}>
+                                                <Text style={styles.miniLabel}>Surcharge (kg)</Text>
+                                                <TouchableOpacity
+                                                    style={styles.dropdownBtn}
+                                                    onPress={() => openSurchargePicker(dayIndex, exIndex)}
+                                                >
+                                                    <Text style={styles.dropdownValue}>+{ex.weight_increment} kg</Text>
+                                                    <Text style={styles.dropdownArrow}>▼</Text>
+                                                </TouchableOpacity>
+                                            </View>
+                                        </View>
                                     </View>
-                                    <View style={styles.miniField}>
-                                        <Text style={styles.miniLabel}>Reps</Text>
-                                        <TextInput style={styles.miniInput} value={ex.target_reps} onChangeText={(v) => updateExercise(dayIndex, exIndex, 'target_reps', v)} keyboardType="numeric" />
-                                    </View>
-                                    <View style={[styles.field, { flex: 2 }]}>
-                                        <Text style={styles.miniLabel}>Surcharge (kg)</Text>
-                                        <TouchableOpacity
-                                            style={styles.dropdownBtn}
-                                            onPress={() => openSurchargePicker(dayIndex, exIndex)}
-                                        >
-                                            <Text style={styles.dropdownValue}>+{ex.weight_increment} kg</Text>
-                                            <Text style={styles.dropdownArrow}>▼</Text>
-                                        </TouchableOpacity>
-                                    </View>
-                                </View>
-                            </View>
-                        ))}
-                        <TouchableOpacity style={styles.addExButton} onPress={() => addExercise(dayIndex)}><Text style={styles.addExText}>+ Ajouter un exercice</Text></TouchableOpacity>
+                                ))}
+                                <TouchableOpacity style={styles.addExButton} onPress={() => addExercise(dayIndex)}><Text style={styles.addExText}>+ Ajouter un exercice</Text></TouchableOpacity>
+                            </>
+                        )}
                     </View>
                 ))}
 
-                <TouchableOpacity style={styles.addDayButton} onPress={addDay}><Text style={styles.addDayText}>+ Ajouter une séance</Text></TouchableOpacity>
+                {/* Removal of Manual "Ajouter une séance" since all 7 days are visible */}
+                <View style={{ marginBottom: SPACING.lg }} />
 
                 <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={loading}>
                     <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.saveGradient}>
@@ -599,6 +640,8 @@ const createStyles = (colors: any) => StyleSheet.create({
     exerciseHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
     exerciseNameInput: { flex: 1, color: colors.text, fontSize: 14, fontWeight: '600' },
     deleteExText: { color: colors.error, fontSize: 16 },
+    restToggleContainer: { alignItems: 'center' },
+    restToggleLabel: { fontSize: 9, color: colors.textSecondary, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
     exerciseRow: { flexDirection: 'row', gap: SPACING.md },
     miniField: { flex: 1 },
     miniLabel: { color: colors.textMuted, fontSize: 9, marginBottom: 2 },

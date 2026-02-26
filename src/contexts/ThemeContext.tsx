@@ -19,7 +19,7 @@ const THEME_STORAGE_KEY = 'user_theme_preference';
 
 export function ThemeProvider({ children }: { children: React.ReactNode }) {
     const systemColorScheme = useColorScheme();
-    const [theme, setTheme] = useState<ThemeType>('dark');
+    const [theme, setTheme] = useState<ThemeType>('light');
 
     useEffect(() => {
         // Load persisted theme
@@ -27,8 +27,8 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
             if (savedTheme === 'light' || savedTheme === 'dark') {
                 setTheme(savedTheme as ThemeType);
             } else {
-                // Fallback to system preference
-                setTheme(systemColorScheme === 'light' ? 'light' : 'dark');
+                // Fallback to light mode by default
+                setTheme('light');
             }
         });
     }, [systemColorScheme]);

@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    Dimensions, ActivityIndicator, RefreshControl,
+    Dimensions, ActivityIndicator, RefreshControl, Modal, FlatList,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { LineChart } from 'react-native-chart-kit';
@@ -32,6 +32,7 @@ export default function ChartsScreen() {
     const [selectedExercise, setSelectedExercise] = useState<string | null>(null);
     const [loading, setLoading] = useState(true);
     const [refreshing, setRefreshing] = useState(false);
+    const [pickerVisible, setPickerVisible] = useState(false);
 
     const fetchExercises = useCallback(async () => {
         if (!user) return;
@@ -211,24 +212,63 @@ export default function ChartsScreen() {
                     ))}
                 </View>
 
-                {/* Exercise Selector */}
+                {/* Exercise Selector Dropdown */}
                 {view === 'exercise' && (
-                    <ScrollView
-                        horizontal showsHorizontalScrollIndicator={false}
-                        style={styles.exerciseSelector}
-                    >
-                        {exercises.map(ex => (
-                            <TouchableOpacity
-                                key={ex.id}
-                                style={[styles.exChip, selectedExercise === ex.id && styles.exChipActive]}
-                                onPress={() => setSelectedExercise(ex.id)}
-                            >
-                                <Text style={[styles.exChipText, selectedExercise === ex.id && styles.exChipTextActive]}>
-                                    {ex.name}
+                    <View style={styles.dropdownContainer}>
+                        <TouchableOpacity
+                            style={styles.dropdownButton}
+                            onPress={() => setPickerVisible(true)}
+                        >
+                            <View style={styles.dropdownContent}>
+                                <Text style={styles.dropdownLabel}>Exercice sélectionné :</Text>
+                                <Text style={styles.dropdownValue}>
+                                    {exercises.find(e => e.id === selectedExercise)?.name || 'Sélectionner un exercice'}
                                 </Text>
-                            </TouchableOpacity>
-                        ))}
-                    </ScrollView>
+                            </View>
+                            <Text style={styles.dropdownArrow}>▼</Text>
+                        </TouchableOpacity>
+
+                        <Modal
+                            visible={pickerVisible}
+                            transparent
+                            animationType="slide"
+                        >
+                            <View style={styles.modalOverlay}>
+                                <View style={styles.modalContent}>
+                                    <View style={styles.modalHeader}>
+                                        <Text style={styles.modalTitle}>Sélectionner un exercice</Text>
+                                        <TouchableOpacity onPress={() => setPickerVisible(false)}>
+                                            <Text style={styles.closeModalText}>Fermer</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                    <FlatList
+                                        data={exercises}
+                                        keyExtractor={(item) => item.id}
+                                        renderItem={({ item }) => (
+                                            <TouchableOpacity
+                                                style={[
+                                                    styles.pickerItem,
+                                                    selectedExercise === item.id && styles.pickerItemActive
+                                                ]}
+                                                onPress={() => {
+                                                    setSelectedExercise(item.id);
+                                                    setPickerVisible(false);
+                                                }}
+                                            >
+                                                <Text style={[
+                                                    styles.pickerItemText,
+                                                    selectedExercise === item.id && styles.pickerItemTextActive
+                                                ]}>
+                                                    {item.name}
+                                                </Text>
+                                                {selectedExercise === item.id && <Text style={styles.checkIcon}>✓</Text>}
+                                            </TouchableOpacity>
+                                        )}
+                                    />
+                                </View>
+                            </View>
+                        </Modal>
+                    </View>
                 )}
 
                 {/* Time Filters */}
@@ -298,15 +338,98 @@ const createStyles = (colors: any) => StyleSheet.create({
     viewTabActive: { backgroundColor: colors.primary },
     viewTabText: { color: colors.textMuted, fontSize: 13, fontWeight: '600' },
     viewTabTextActive: { color: '#FFFFFF' },
-    exerciseSelector: { maxHeight: 48, marginBottom: SPACING.md },
-    exChip: {
-        paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm,
-        borderRadius: BORDER_RADIUS.full, backgroundColor: colors.card,
-        marginRight: SPACING.sm, borderWidth: 1, borderColor: colors.border,
+    dropdownContainer: { marginBottom: SPACING.md },
+    dropdownButton: {
+        backgroundColor: colors.card,
+        borderRadius: BORDER_RADIUS.md,
+        padding: SPACING.md,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderWidth: 1,
+        borderColor: colors.border,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.05,
+        shadowRadius: 5,
+        elevation: 2,
     },
-    exChipActive: { backgroundColor: colors.primaryDark, borderColor: colors.primary },
-    exChipText: { color: colors.textSecondary, fontSize: 13, fontWeight: '600' },
-    exChipTextActive: { color: '#FFFFFF' },
+    dropdownContent: { flex: 1 },
+    dropdownLabel: {
+        fontSize: 10,
+        color: colors.textMuted,
+        textTransform: 'uppercase',
+        fontWeight: '700',
+        marginBottom: 2,
+    },
+    dropdownValue: {
+        fontSize: 16,
+        fontWeight: '700',
+        color: colors.text,
+    },
+    dropdownArrow: {
+        fontSize: 12,
+        color: colors.textMuted,
+        marginLeft: SPACING.sm,
+    },
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.5)',
+        justifyContent: 'flex-end',
+    },
+    modalContent: {
+        backgroundColor: colors.card,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        paddingTop: SPACING.lg,
+        paddingHorizontal: SPACING.lg,
+        paddingBottom: 40,
+        maxHeight: '80%',
+    },
+    modalHeader: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        marginBottom: SPACING.lg,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        color: colors.text,
+    },
+    closeModalText: {
+        color: colors.primary,
+        fontSize: 16,
+        fontWeight: '700',
+    },
+    pickerItem: {
+        flexDirection: 'row',
+        justifyContent: 'space-between',
+        alignItems: 'center',
+        paddingVertical: SPACING.md,
+        borderBottomWidth: 1,
+        borderBottomColor: colors.border + '40',
+    },
+    pickerItemActive: {
+        backgroundColor: colors.primary + '10',
+        borderRadius: 8,
+        paddingHorizontal: 12,
+        marginHorizontal: -12,
+    },
+    pickerItemText: {
+        fontSize: 16,
+        color: colors.text,
+        fontWeight: '500',
+    },
+    pickerItemTextActive: {
+        color: colors.primary,
+        fontWeight: '700',
+    },
+    checkIcon: {
+        color: colors.primary,
+        fontSize: 16,
+        fontWeight: '700',
+    },
     filterRow: {
         flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg,
         justifyContent: 'center',

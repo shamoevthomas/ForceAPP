@@ -67,7 +67,7 @@ export const LIGHT_COLORS = {
 };
 
 // Legacy support
-export const COLORS = DARK_COLORS;
+export const COLORS = LIGHT_COLORS;
 
 export const FONTS = {
     regular: 'System',
@@ -93,13 +93,13 @@ export const BORDER_RADIUS = {
 };
 
 export const GRADE_COLORS: Record<string, string> = {
-    'Gringalet': DARK_COLORS.gradeGringalet,
-    'Crevette': DARK_COLORS.gradeCrevette,
-    'Costaud': DARK_COLORS.gradeCostaud,
-    'Guerrier': DARK_COLORS.gradeGuerrier,
-    'Machine': DARK_COLORS.gradeMachine,
-    'Titan': DARK_COLORS.gradeTitan,
-    'Hulk': DARK_COLORS.gradeHulk,
+    'Gringalet': LIGHT_COLORS.gradeGringalet,
+    'Crevette': LIGHT_COLORS.gradeCrevette,
+    'Costaud': LIGHT_COLORS.gradeCostaud,
+    'Guerrier': LIGHT_COLORS.gradeGuerrier,
+    'Machine': LIGHT_COLORS.gradeMachine,
+    'Titan': LIGHT_COLORS.gradeTitan,
+    'Hulk': LIGHT_COLORS.gradeHulk,
 };
 
 export const GRADE_EMOJIS: Record<string, string> = {

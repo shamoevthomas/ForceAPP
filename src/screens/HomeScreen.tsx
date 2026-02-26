@@ -4,14 +4,16 @@ import {
     TextInput, Alert, RefreshControl, Image, Modal, FlatList,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useNavigation } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
-import { SPACING, BORDER_RADIUS, GRADE_EMOJIS } from '../constants/theme';
+import { SPACING, BORDER_RADIUS, GRADE_EMOJIS, COLORS } from '../constants/theme';
 
 export default function HomeScreen() {
     const { profile, user, refreshProfile, updateProfile } = useAuth();
     const { colors, isDark } = useTheme();
+    const navigation = useNavigation<any>();
     const styles = createStyles(colors);
     const [streak, setStreak] = useState(0);
     const [grade, setGrade] = useState('Gringalet');
@@ -47,7 +49,7 @@ export default function HomeScreen() {
         const dayOfWeek = (new Date().getDay() + 6) % 7; // 0=Mon, 6=Sun
         const { data: programData } = await supabase
             .from('programs')
-            .select('program_days(day_number, day_label)')
+            .select('program_days(day_number, day_label, is_rest_day)')
             .eq('user_id', user.id)
             .eq('is_active', true)
             .single();
@@ -55,7 +57,11 @@ export default function HomeScreen() {
         if (programData?.program_days) {
             const daysArr = Array.isArray(programData.program_days) ? programData.program_days : [];
             const today = (daysArr as any[]).find(d => d.day_number === dayOfWeek + 1);
-            setTodaySession(today ? (today.day_label || `Jour ${today.day_number}`) : 'Repos 😴');
+            if (today?.is_rest_day) {
+                setTodaySession('Repos 😴');
+            } else {
+                setTodaySession(today ? (today.day_label || `Jour ${today.day_number}`) : 'Repos 😴');
+            }
         } else {
             setTodaySession('Repos 😴');
         }
@@ -103,6 +109,11 @@ export default function HomeScreen() {
                 contentContainerStyle={styles.scroll}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             >
+                {/* Centered Title */}
+                <View style={styles.topTitleContainer}>
+                    <Text style={styles.topTitle}>Tableau de bord</Text>
+                </View>
+
                 {/* Header: Salut [Pseudo] + PP small on right */}
                 <View style={styles.header}>
                     <View style={styles.headerTextContainer}>
@@ -126,7 +137,7 @@ export default function HomeScreen() {
                         <Text style={styles.bubbleEmoji}>🔥</Text>
                         <View>
                             <Text style={styles.bubbleValue}>{streak}</Text>
-                            <Text style={styles.bubbleLabel}>jours consécutifs</Text>
+                            <Text style={styles.bubbleLabel}>Jours Consécutifs</Text>
                         </View>
                     </View>
 
@@ -155,7 +166,7 @@ export default function HomeScreen() {
                             ) : (
                                 <>
                                     <Text style={styles.bubbleValue}>{profile?.current_weight_kg?.toFixed(1) || '—'}</Text>
-                                    <Text style={styles.bubbleLabel}>poids (kg)</Text>
+                                    <Text style={styles.bubbleLabel}>Poids (kg)</Text>
                                 </>
                             )}
                         </View>
@@ -164,36 +175,38 @@ export default function HomeScreen() {
 
                 {/* Grade Card - Large Cell */}
                 <View style={styles.largeCard}>
-                    <LinearGradient
-                        colors={[isDark ? colors.card : colors.backgroundLight, isDark ? '#1A1A3E' : '#F1F3F5']}
-                        style={styles.cardGradient}
-                    >
+                    <View style={styles.cardContent}>
                         <View style={styles.cardHeaderRow}>
-                            <Text style={styles.cardLabel}>Grade de Force</Text>
+                            <Text style={styles.cardLabel}>RANG DE FORCE</Text>
                             <TouchableOpacity style={styles.podiumBtn} onPress={() => setPodiumVisible(true)}>
                                 <Text style={styles.podiumIcon}>🏆</Text>
                             </TouchableOpacity>
                         </View>
                         <View style={styles.gradeCenter}>
                             <Text style={styles.gradeEmojiLarge}>{gradeEmoji}</Text>
-                            <Text style={[styles.gradeValue, { color: gradeColor }]}>{grade.toUpperCase()}</Text>
+                            <Text style={[styles.gradeValue, { color: '#2D3182' }]}>{grade.toUpperCase()}</Text>
                             <Text style={styles.volumeText}>{totalVolume.toLocaleString()} kg total</Text>
                         </View>
-                        <View style={styles.gradeProgressBg}>
-                            <View
-                                style={[
-                                    styles.gradeProgressFill,
-                                    {
-                                        backgroundColor: gradeColor,
-                                        width: `${Math.min(100, (totalVolume / (GRADE_THRESHOLDS.find((t, i) => {
-                                            const currentIdx = GRADE_THRESHOLDS.findIndex(gt => gt.name === grade);
-                                            return i === currentIdx + 1;
-                                        })?.volume || totalVolume)) * 100)}%`
-                                    }
-                                ]}
-                            />
+                        <View style={styles.progressContainer}>
+                            <View style={styles.gradeProgressBg}>
+                                <View
+                                    style={[
+                                        styles.gradeProgressFill,
+                                        {
+                                            backgroundColor: '#2D3182',
+                                            width: `${Math.min(100, (totalVolume / (GRADE_THRESHOLDS.find((t, i) => {
+                                                const currentIdx = GRADE_THRESHOLDS.findIndex(gt => gt.name === grade);
+                                                return i === currentIdx + 1;
+                                            })?.volume || totalVolume)) * 100)}%`
+                                        }
+                                    ]}
+                                />
+                            </View>
+                            <View style={styles.trophyContainer}>
+                                <Text style={styles.trophyIconMini}>🏆</Text>
+                            </View>
                         </View>
-                    </LinearGradient>
+                    </View>
                 </View>
 
                 {/* Podium Modal */}
@@ -245,16 +258,25 @@ export default function HomeScreen() {
 
                 {/* Today Session Card - Large Cell Bottom */}
                 <View style={[styles.largeCard, styles.sessionCard]}>
-                    <TouchableOpacity style={styles.sessionInner}>
+                    <View style={styles.sessionInner}>
                         <View style={styles.sessionHeader}>
-                            <Text style={styles.sessionLabel}>Séance du jour</Text>
-                            <Text style={styles.sessionStatusBadge}>{todaySession === 'Repos 😴' ? 'REPOS' : 'À FAIRE'}</Text>
+                            <Text style={styles.sessionLabel}>Séance du Jour</Text>
                         </View>
                         <Text style={styles.sessionTitle}>{todaySession}</Text>
                         <Text style={styles.sessionSubtext}>
-                            {todaySession === 'Repos 😴' ? 'Récupère bien pour demain !' : 'C\'est le moment de tout donner.'}
+                            {todaySession === 'Repos 😴' ? 'Récupère bien pour demain !' : "C'est le moment de tout donner."}
                         </Text>
-                    </TouchableOpacity>
+
+                        {todaySession !== 'Repos 😴' && (
+                            <TouchableOpacity
+                                style={styles.commencerBtn}
+                                onPress={() => navigation.navigate('Progression')}
+                            >
+                                <Text style={styles.commencerBtnText}>Commencer</Text>
+                                <Text style={styles.commencerBtnArrow}>→</Text>
+                            </TouchableOpacity>
+                        )}
+                    </View>
                 </View>
 
                 <Text style={styles.footerBranding}>Product By Thomas Shamoev</Text>
@@ -265,7 +287,16 @@ export default function HomeScreen() {
 
 const createStyles = (colors: any) => StyleSheet.create({
     container: { flex: 1 },
-    scroll: { padding: SPACING.lg, paddingTop: 60, paddingBottom: 100 },
+    scroll: { padding: SPACING.lg, paddingTop: 40, paddingBottom: 100 },
+    topTitleContainer: {
+        alignItems: 'center',
+        marginBottom: SPACING.xl,
+    },
+    topTitle: {
+        fontSize: 18,
+        fontWeight: '700',
+        color: colors.text,
+    },
     header: {
         flexDirection: 'row',
         justifyContent: 'space-between',
@@ -273,14 +304,14 @@ const createStyles = (colors: any) => StyleSheet.create({
         marginBottom: SPACING.xl,
     },
     headerTextContainer: { flex: 1 },
-    greeting: { fontSize: 24, fontWeight: '800', color: colors.text },
-    headerSub: { fontSize: 14, color: colors.textSecondary, marginTop: 2 },
+    greeting: { fontSize: 28, fontWeight: '800', color: colors.text },
+    headerSub: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
     avatarMiniContainer: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: 50,
+        height: 50,
+        borderRadius: 25,
         borderWidth: 2,
-        borderColor: colors.primary,
+        borderColor: '#2D3182',
         overflow: 'hidden',
         marginLeft: SPACING.md,
     },
@@ -295,19 +326,24 @@ const createStyles = (colors: any) => StyleSheet.create({
     bubblesRow: { flexDirection: 'row', gap: SPACING.md, marginBottom: SPACING.lg },
     bubble: {
         flex: 1,
-        backgroundColor: colors.card,
+        backgroundColor: '#FFFFFF',
         borderRadius: BORDER_RADIUS.lg,
         padding: SPACING.md,
         flexDirection: 'row',
         alignItems: 'center',
         gap: SPACING.sm,
         borderWidth: 1,
-        borderColor: colors.border,
-        height: 70,
+        borderColor: '#E2E8F0',
+        height: 80,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.1,
+        shadowRadius: 12,
+        elevation: 4,
     },
     bubbleEmoji: { fontSize: 24 },
-    bubbleValue: { fontSize: 20, fontWeight: '800', color: colors.text },
-    bubbleLabel: { fontSize: 10, color: colors.textSecondary, fontWeight: '600', textTransform: 'uppercase' },
+    bubbleValue: { fontSize: 22, fontWeight: '800', color: colors.text },
+    bubbleLabel: { fontSize: 11, color: colors.textSecondary, fontWeight: '600' },
 
     weightEditInline: { flexDirection: 'column' },
     weightInputSmall: {
@@ -319,52 +355,81 @@ const createStyles = (colors: any) => StyleSheet.create({
     },
 
     largeCard: {
-        borderRadius: BORDER_RADIUS.xl,
-        overflow: 'hidden',
+        backgroundColor: '#FFFFFF',
+        borderRadius: 24,
+        padding: SPACING.xl,
         marginBottom: SPACING.md,
         borderWidth: 1,
-        borderColor: colors.border,
+        borderColor: '#E2E8F0',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.08,
+        shadowRadius: 16,
+        elevation: 4,
     },
-    cardGradient: { padding: SPACING.xl, alignItems: 'center', paddingTop: SPACING.lg },
-    cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: SPACING.sm },
+    cardContent: { alignItems: 'center' },
+    cardHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', width: '100%', marginBottom: SPACING.md },
     podiumBtn: { backgroundColor: colors.border + '30', padding: 8, borderRadius: 12 },
     podiumIcon: { fontSize: 18 },
     cardLabel: {
-        fontSize: 12,
-        fontWeight: '700',
-        color: colors.textMuted,
-        textTransform: 'uppercase',
+        fontSize: 14,
+        fontWeight: '800',
+        color: '#2D3182',
         letterSpacing: 1,
     },
-    gradeCenter: { alignItems: 'center', marginBottom: SPACING.md },
-    gradeEmojiLarge: { fontSize: 60, marginBottom: SPACING.xs },
-    gradeValue: { fontSize: 32, fontWeight: '900', letterSpacing: 2 },
-    volumeText: { color: colors.textSecondary, fontSize: 13, fontWeight: '700', marginTop: 4 },
-    gradeProgressBg: {
+    gradeCenter: { alignItems: 'center', marginBottom: SPACING.lg },
+    gradeEmojiLarge: { fontSize: 80, marginBottom: SPACING.xs },
+    gradeValue: { fontSize: 36, fontWeight: '900', letterSpacing: 2 },
+    volumeText: { color: colors.textSecondary, fontSize: 14, fontWeight: '700', marginTop: 4 },
+    progressContainer: {
         width: '100%',
-        height: 6,
-        backgroundColor: colors.border + '40',
-        borderRadius: 3,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    gradeProgressBg: {
+        flex: 1,
+        height: 12,
+        backgroundColor: '#E2E8F0',
+        borderRadius: 6,
         overflow: 'hidden'
     },
-    gradeProgressFill: { height: '100%', borderRadius: 3 },
+    gradeProgressFill: { height: '100%', borderRadius: 6 },
+    trophyContainer: {
+        backgroundColor: '#CBD5E1',
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    trophyIconMini: { fontSize: 16 },
 
-    sessionCard: { backgroundColor: colors.card, borderWidth: 1 },
-    sessionInner: { padding: SPACING.xl },
-    sessionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm },
-    sessionLabel: { fontSize: 12, fontWeight: '700', color: colors.textMuted, textTransform: 'uppercase' },
-    sessionStatusBadge: {
-        fontSize: 10,
-        fontWeight: '800',
-        color: '#FFFFFF',
-        backgroundColor: colors.primary,
-        paddingHorizontal: 8,
-        paddingVertical: 2,
-        borderRadius: 4,
-        overflow: 'hidden'
+    sessionCard: { backgroundColor: '#FFFFFF' },
+    sessionInner: { width: '100%' },
+    sessionHeader: { marginBottom: SPACING.sm },
+    sessionLabel: { fontSize: 14, fontWeight: '800', color: '#2D3182' },
+    sessionTitle: { fontSize: 32, fontWeight: '900', color: '#000000' },
+    sessionSubtext: { fontSize: 16, color: colors.textSecondary, marginTop: 4, marginBottom: SPACING.lg },
+    commencerBtn: {
+        backgroundColor: '#2D3182',
+        borderRadius: 16,
+        paddingVertical: 16,
+        flexDirection: 'row',
+        justifyContent: 'center',
+        alignItems: 'center',
+        gap: 10,
     },
-    sessionTitle: { fontSize: 26, fontWeight: '800', color: colors.text },
-    sessionSubtext: { fontSize: 14, color: colors.textSecondary, marginTop: 4 },
+    commencerBtnText: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '800',
+    },
+    commencerBtnArrow: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '800',
+    },
     footerBranding: { textAlign: 'center', color: colors.textMuted, fontSize: 12, fontWeight: '600', marginTop: SPACING.xl, opacity: 0.6 },
 
     modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },

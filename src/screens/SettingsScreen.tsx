@@ -55,6 +55,7 @@ export default function SettingsScreen() {
         return age;
     };
 
+    const [currentPassword, setCurrentPassword] = useState('');
     const [newPassword, setNewPassword] = useState('');
     const [changingPassword, setChangingPassword] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -128,18 +129,39 @@ export default function SettingsScreen() {
     };
 
     const handleChangePassword = async () => {
-        if (newPassword.length < 6) {
-            showAlert('Erreur', 'Le mot de passe doit contenir au moins 6 caractères.');
+        if (!currentPassword) {
+            showAlert('Erreur', 'Veuillez entrer votre mot de passe actuel.');
             return;
         }
+        if (newPassword.length < 6) {
+            showAlert('Erreur', 'Le nouveau mot de passe doit contenir au moins 6 caractères.');
+            return;
+        }
+
         setChangingPassword(true);
+
+        // 1. Verify current password by attempting a silent sign-in
+        const { error: verifyError } = await supabase.auth.signInWithPassword({
+            email: user?.email || '',
+            password: currentPassword,
+        });
+
+        if (verifyError) {
+            setChangingPassword(false);
+            showAlert('Erreur', 'Mot de passe actuel incorrect.');
+            return;
+        }
+
+        // 2. If verified, update to new password
         const { error } = await supabase.auth.updateUser({ password: newPassword });
         setChangingPassword(false);
+
         if (error) {
             showAlert('Erreur', error.message);
         } else {
+            setCurrentPassword('');
             setNewPassword('');
-            showAlert('✅ Mot de passe changé', '');
+            showAlert('✅ Mot de passe changé', 'Votre mot de passe a été mis à jour avec succès.');
         }
     };
 
@@ -345,7 +367,15 @@ export default function SettingsScreen() {
 
                 {/* Password Section */}
                 <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Mot de passe</Text>
+                    <Text style={styles.sectionTitle}>Changer le mot de passe</Text>
+                    <TextInput
+                        style={styles.input}
+                        placeholder="Mot de passe actuel"
+                        placeholderTextColor={colors.textMuted}
+                        value={currentPassword}
+                        onChangeText={setCurrentPassword}
+                        secureTextEntry
+                    />
                     <TextInput
                         style={styles.input}
                         placeholder="Nouveau mot de passe"
@@ -355,14 +385,14 @@ export default function SettingsScreen() {
                         secureTextEntry
                     />
                     <TouchableOpacity
-                        style={styles.changePasswordButton}
+                        style={[styles.changePasswordButton, (changingPassword || !newPassword || !currentPassword) && { opacity: 0.6 }]}
                         onPress={handleChangePassword}
-                        disabled={changingPassword || !newPassword}
+                        disabled={changingPassword || !newPassword || !currentPassword}
                     >
                         {changingPassword ? (
                             <ActivityIndicator color={colors.text} />
                         ) : (
-                            <Text style={styles.changePasswordText}>Changer le mot de passe</Text>
+                            <Text style={styles.changePasswordText}>Confirmer le changement</Text>
                         )}
                     </TouchableOpacity>
                 </View>
@@ -486,13 +516,13 @@ const createStyles = (colors: any) => StyleSheet.create({
         paddingVertical: SPACING.sm, borderBottomWidth: 1,
         borderBottomColor: colors.border + '40',
     },
-    infoLabel: { color: colors.textSecondary, fontSize: 15 },
+    infoLabel: { color: colors.textSecondary, fontSize: 13 },
     infoValue: { color: colors.text, fontSize: 15, fontWeight: '600' },
     weightRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
     weightInput: {
         flex: 1, backgroundColor: colors.backgroundLight,
-        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
-        color: colors.text, fontSize: 20, fontWeight: '700',
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.sm,
+        color: colors.text, fontSize: 17, fontWeight: '700',
         borderWidth: 1, borderColor: colors.border,
     },
     weightUnit: { color: colors.textSecondary, fontSize: 16, fontWeight: '600' },
@@ -503,8 +533,8 @@ const createStyles = (colors: any) => StyleSheet.create({
     weightSaveText: { fontSize: 20 },
     input: {
         backgroundColor: colors.backgroundLight,
-        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
-        color: colors.text, fontSize: 16, marginBottom: SPACING.md,
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.sm,
+        color: colors.text, fontSize: 14, marginBottom: SPACING.md,
         borderWidth: 1, borderColor: colors.border,
     },
     changePasswordButton: {

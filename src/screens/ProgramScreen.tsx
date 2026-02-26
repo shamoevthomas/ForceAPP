@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
     View, Text, StyleSheet, ScrollView, TouchableOpacity,
-    Alert, ActivityIndicator, RefreshControl, Switch,
+    Alert, ActivityIndicator, RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
@@ -35,8 +35,8 @@ export default function ProgramScreen() {
     const today = (new Date().getDay() + 6) % 7 + 1;
     const [selectedDayId, setSelectedDayId] = useState(today);
 
-    // Local rest toggle per day (in a real app, this might be saved in DB)
-    const [restDays, setRestDays] = useState<Record<number, boolean>>({});
+    // Removed local restDays state as we now use is_rest_day from DB
+    // const [restDays, setRestDays] = useState<Record<number, boolean>>({});
 
     const fetchProgram = useCallback(async () => {
         if (!user) return;
@@ -86,11 +86,8 @@ export default function ProgramScreen() {
         return program.program_days.find(d => d.day_number === selectedDayId);
     }, [program, selectedDayId]);
 
-    const isRestDay = restDays[selectedDayId] || !currentDayData || currentDayData.exercises.length === 0;
+    const isRestDay = !!currentDayData?.is_rest_day;
 
-    const toggleRest = (value: boolean) => {
-        setRestDays(prev => ({ ...prev, [selectedDayId]: value }));
-    };
 
     const handleReset = () => {
         Alert.alert(
@@ -139,7 +136,6 @@ export default function ProgramScreen() {
         return <ProgramCreationScreen onComplete={() => fetchProgram()} />;
     }
 
-    const selectedDayName = WEEKDAYS.find(w => w.id === selectedDayId)?.full;
 
     return (
         <LinearGradient colors={[colors.background, isDark ? '#0D0D2B' : colors.cardLight]} style={styles.container}>
@@ -182,24 +178,6 @@ export default function ProgramScreen() {
                 contentContainerStyle={styles.scroll}
                 refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}
             >
-                {/* Rest Switch Card */}
-                <View style={styles.restCard}>
-                    <View style={styles.restInfo}>
-                        <Text style={styles.restEmoji}>{isRestDay ? '😴' : '⚡'}</Text>
-                        <View>
-                            <Text style={styles.restTitle}>
-                                {isRestDay ? 'Jour de repos' : 'Jour d\'entraînement'}
-                            </Text>
-                            <Text style={styles.restSubtitle}>{selectedDayName}</Text>
-                        </View>
-                    </View>
-                    <Switch
-                        value={isRestDay}
-                        onValueChange={toggleRest}
-                        trackColor={{ false: colors.border, true: colors.primary + '80' }}
-                        thumbColor={isRestDay ? colors.primary : '#f4f3f4'}
-                    />
-                </View>
 
                 {/* Exercises or Rest Message */}
                 {isRestDay ? (
@@ -316,21 +294,6 @@ const createStyles = (colors: any) => StyleSheet.create({
 
     scroll: { padding: SPACING.lg, paddingBottom: 120 },
 
-    restCard: {
-        backgroundColor: colors.card,
-        borderRadius: BORDER_RADIUS.lg,
-        padding: SPACING.md,
-        flexDirection: 'row',
-        justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: SPACING.lg,
-        borderWidth: 1,
-        borderColor: colors.border,
-    },
-    restInfo: { flexDirection: 'row', alignItems: 'center', gap: SPACING.md },
-    restEmoji: { fontSize: 28 },
-    restTitle: { fontSize: 16, fontWeight: '800', color: colors.text },
-    restSubtitle: { fontSize: 12, color: colors.textSecondary },
 
     sessionTitle: {
         fontSize: 20,

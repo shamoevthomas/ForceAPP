@@ -32,6 +32,7 @@ export interface ProgramDay {
     program_id: string;
     day_number: number;
     day_label: string | null;
+    is_rest_day: boolean;
 }
 
 export interface Exercise {
