@@ -41,6 +41,7 @@ export default function SettingsScreen() {
     const [newPassword, setNewPassword] = useState('');
     const [changingPassword, setChangingPassword] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [resetting, setResetting] = useState(false);
 
     const handleSaveWeight = async () => {
         const w = parseFloat(weight);
@@ -132,6 +133,43 @@ export default function SettingsScreen() {
             { text: 'Annuler', style: 'cancel' },
             { text: 'Déconnexion', onPress: signOut },
         ]);
+    };
+
+    const handleResetData = () => {
+        Alert.alert(
+            '🔄 Remettre à zéro',
+            'Cette action supprimera tous tes entraînements et programmes.\n\nTes informations de profil (pseudo, âge, niveau, photo) seront conservées.',
+            [
+                { text: 'Annuler', style: 'cancel' },
+                {
+                    text: 'Réinitialiser',
+                    style: 'destructive',
+                    onPress: () => {
+                        Alert.alert(
+                            'Dernière confirmation',
+                            'Tous tes programmes et historiques d\'entraînement seront effacés. Cette action est irréversible.',
+                            [
+                                { text: 'Non, annuler', style: 'cancel' },
+                                {
+                                    text: 'Oui, remettre à zéro',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                        setResetting(true);
+                                        const { error } = await supabase.rpc('reset_user_data');
+                                        setResetting(false);
+                                        if (error) {
+                                            Alert.alert('Erreur', error.message || 'Impossible de réinitialiser les données.');
+                                            return;
+                                        }
+                                        Alert.alert('✅ Remis à zéro', 'Tes entraînements et programmes ont été supprimés.');
+                                    },
+                                },
+                            ],
+                        );
+                    },
+                },
+            ],
+        );
     };
 
     const handleDeleteAccount = () => {
@@ -341,6 +379,18 @@ export default function SettingsScreen() {
                     </TouchableOpacity>
 
                     <TouchableOpacity
+                        style={[styles.resetButton, resetting && { opacity: 0.6 }]}
+                        onPress={handleResetData}
+                        disabled={resetting}
+                    >
+                        {resetting ? (
+                            <ActivityIndicator color="#F59E0B" />
+                        ) : (
+                            <Text style={styles.resetText}>🔄 Remettre à zéro</Text>
+                        )}
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
                         style={[styles.deleteButton, deleting && { opacity: 0.6 }]}
                         onPress={handleDeleteAccount}
                         disabled={deleting}
@@ -424,6 +474,13 @@ const createStyles = (colors: any) => StyleSheet.create({
         alignItems: 'center', marginBottom: SPACING.md,
     },
     logoutText: { color: colors.text, fontSize: 16, fontWeight: '600' },
+    resetButton: {
+        backgroundColor: '#F59E0B20',
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
+        alignItems: 'center', borderWidth: 1, borderColor: '#F59E0B40',
+        marginBottom: SPACING.md,
+    },
+    resetText: { color: '#F59E0B', fontSize: 16, fontWeight: '600' },
     deleteButton: {
         backgroundColor: colors.error + '20',
         borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
