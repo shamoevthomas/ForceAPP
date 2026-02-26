@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
-    ScrollView, Alert, ActivityIndicator, Image,
+    ScrollView, ActivityIndicator, Image, Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -9,6 +9,14 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { SPACING, BORDER_RADIUS } from '../constants/theme';
+
+type ModalConfig = {
+    title: string;
+    message: string;
+    confirmText?: string;
+    onConfirm?: () => void;
+    destructive?: boolean;
+};
 
 export default function SettingsScreen() {
     const { user, profile, signOut, updateProfile, refreshProfile } = useAuth();
@@ -22,6 +30,16 @@ export default function SettingsScreen() {
         const [y, m, d] = profile.birth_date.split('-');
         return `${d}/${m}/${y}`;
     });
+    const [modal, setModal] = useState<ModalConfig | null>(null);
+
+    const showAlert = (title: string, message: string) => setModal({ title, message });
+    const showConfirm = (
+        title: string,
+        message: string,
+        confirmText: string,
+        onConfirm: () => void,
+        destructive = false,
+    ) => setModal({ title, message, confirmText, onConfirm, destructive });
 
     const calculateAge = (dateStr: string) => {
         if (dateStr.length < 10) return null;
@@ -37,7 +55,6 @@ export default function SettingsScreen() {
         return age;
     };
 
-    // Password change
     const [newPassword, setNewPassword] = useState('');
     const [changingPassword, setChangingPassword] = useState(false);
     const [deleting, setDeleting] = useState(false);
@@ -64,7 +81,7 @@ export default function SettingsScreen() {
             ...ageUpdate
         });
         setSaving(false);
-        Alert.alert('✅ Profil mis à jour');
+        showAlert('✅ Profil mis à jour', '');
     };
 
     const handlePickAvatar = async () => {
@@ -83,7 +100,6 @@ export default function SettingsScreen() {
             const ext = uri.split('.').pop() || 'jpg';
             const fileName = `${user?.id}/avatar.${ext}`;
 
-            // Convert to blob
             const response = await fetch(uri);
             const blob = await response.blob();
             const arrayBuffer = await new Response(blob).arrayBuffer();
@@ -101,112 +117,91 @@ export default function SettingsScreen() {
                 .from('avatars')
                 .getPublicUrl(fileName);
 
-            // Add cache buster to URL
             const avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`;
             await updateProfile({ avatar_url: avatarUrl });
             setUploading(false);
-            Alert.alert('✅ Photo mise à jour');
+            showAlert('✅ Photo mise à jour', '');
         } catch (err: any) {
             setUploading(false);
-            Alert.alert('Erreur', err.message);
+            showAlert('Erreur', err.message);
         }
     };
 
     const handleChangePassword = async () => {
         if (newPassword.length < 6) {
-            Alert.alert('Erreur', 'Le mot de passe doit contenir au moins 6 caractères.');
+            showAlert('Erreur', 'Le mot de passe doit contenir au moins 6 caractères.');
             return;
         }
         setChangingPassword(true);
         const { error } = await supabase.auth.updateUser({ password: newPassword });
         setChangingPassword(false);
         if (error) {
-            Alert.alert('Erreur', error.message);
+            showAlert('Erreur', error.message);
         } else {
             setNewPassword('');
-            Alert.alert('✅ Mot de passe changé');
+            showAlert('✅ Mot de passe changé', '');
         }
     };
 
     const handleSignOut = () => {
-        Alert.alert('Déconnexion', 'Tu es sûr de vouloir te déconnecter ?', [
-            { text: 'Annuler', style: 'cancel' },
-            { text: 'Déconnexion', onPress: signOut },
-        ]);
+        showConfirm(
+            'Déconnexion',
+            'Tu es sûr de vouloir te déconnecter ?',
+            'Déconnexion',
+            signOut,
+        );
     };
 
     const handleResetData = () => {
-        Alert.alert(
+        showConfirm(
             '🔄 Remettre à zéro',
             'Cette action supprimera tous tes entraînements et programmes.\n\nTes informations de profil (pseudo, âge, niveau, photo) seront conservées.',
-            [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                    text: 'Réinitialiser',
-                    style: 'destructive',
-                    onPress: () => {
-                        Alert.alert(
-                            'Dernière confirmation',
-                            'Tous tes programmes et historiques d\'entraînement seront effacés. Cette action est irréversible.',
-                            [
-                                { text: 'Non, annuler', style: 'cancel' },
-                                {
-                                    text: 'Oui, remettre à zéro',
-                                    style: 'destructive',
-                                    onPress: async () => {
-                                        setResetting(true);
-                                        const { error } = await supabase.rpc('reset_user_data');
-                                        setResetting(false);
-                                        if (error) {
-                                            Alert.alert('Erreur', error.message || 'Impossible de réinitialiser les données.');
-                                            return;
-                                        }
-                                        Alert.alert('✅ Remis à zéro', 'Tes entraînements et programmes ont été supprimés.');
-                                    },
-                                },
-                            ],
-                        );
+            'Réinitialiser',
+            () => {
+                showConfirm(
+                    'Dernière confirmation',
+                    "Tous tes programmes et historiques d'entraînement seront effacés. Cette action est irréversible.",
+                    'Oui, remettre à zéro',
+                    async () => {
+                        setResetting(true);
+                        const { error } = await supabase.rpc('reset_user_data');
+                        setResetting(false);
+                        if (error) {
+                            showAlert('Erreur', error.message || 'Impossible de réinitialiser les données.');
+                            return;
+                        }
+                        showAlert('✅ Remis à zéro', 'Tes entraînements et programmes ont été supprimés.');
                     },
-                },
-            ],
+                    true,
+                );
+            },
         );
     };
 
     const handleDeleteAccount = () => {
-        Alert.alert(
+        showConfirm(
             '⚠️ Supprimer le compte',
             'Cette action est IRRÉVERSIBLE. Toutes tes données (entraînements, programmes, photos) seront définitivement supprimées.',
-            [
-                { text: 'Annuler', style: 'cancel' },
-                {
-                    text: 'Supprimer définitivement',
-                    style: 'destructive',
-                    onPress: () => {
-                        // Double confirmation
-                        Alert.alert(
-                            'Dernière confirmation',
-                            'Es-tu vraiment sûr ? Cette opération est irréversible.',
-                            [
-                                { text: 'Non, annuler', style: 'cancel' },
-                                {
-                                    text: 'Oui, supprimer',
-                                    style: 'destructive',
-                                    onPress: async () => {
-                                        setDeleting(true);
-                                        const { error } = await supabase.rpc('delete_user_account');
-                                        if (error) {
-                                            setDeleting(false);
-                                            Alert.alert('Erreur', error.message || 'Impossible de supprimer le compte.');
-                                            return;
-                                        }
-                                        await signOut();
-                                    },
-                                },
-                            ],
-                        );
+            'Supprimer définitivement',
+            () => {
+                showConfirm(
+                    'Dernière confirmation',
+                    'Es-tu vraiment sûr ? Cette opération est irréversible.',
+                    'Oui, supprimer',
+                    async () => {
+                        setDeleting(true);
+                        const { error } = await supabase.rpc('delete_user_account');
+                        if (error) {
+                            setDeleting(false);
+                            showAlert('Erreur', error.message || 'Impossible de supprimer le compte.');
+                            return;
+                        }
+                        await signOut();
                     },
-                },
-            ],
+                    true,
+                );
+            },
+            true,
         );
     };
 
@@ -286,7 +281,7 @@ export default function SettingsScreen() {
                                     setSaving(true);
                                     const { error } = await updateProfile({ gender: 'male' });
                                     setSaving(false);
-                                    if (error) Alert.alert('Erreur', error.message);
+                                    if (error) showAlert('Erreur', error.message);
                                 }}
                             >
                                 <Text style={styles.genderMiniText}>👨 H</Text>
@@ -298,7 +293,7 @@ export default function SettingsScreen() {
                                     setSaving(true);
                                     const { error } = await updateProfile({ gender: 'female' });
                                     setSaving(false);
-                                    if (error) Alert.alert('Erreur', error.message);
+                                    if (error) showAlert('Erreur', error.message);
                                 }}
                             >
                                 <Text style={styles.genderMiniText}>👩 F</Text>
@@ -405,6 +400,55 @@ export default function SettingsScreen() {
 
                 <Text style={styles.footerBranding}>Product By Thomas Shamoev</Text>
             </ScrollView>
+
+            {/* Custom Modal — remplace Alert.alert (bloqué sur iOS PWA) */}
+            <Modal
+                visible={modal !== null}
+                transparent
+                animationType="fade"
+                onRequestClose={() => setModal(null)}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalBox, { backgroundColor: colors.card, borderColor: colors.border }]}>
+                        <Text style={[styles.modalTitle, { color: colors.text }]}>{modal?.title}</Text>
+                        {!!modal?.message && (
+                            <Text style={[styles.modalMessage, { color: colors.textSecondary }]}>{modal.message}</Text>
+                        )}
+                        <View style={styles.modalButtons}>
+                            {modal?.confirmText ? (
+                                <>
+                                    <TouchableOpacity
+                                        style={[styles.modalBtn, { borderWidth: 1, borderColor: colors.border }]}
+                                        onPress={() => setModal(null)}
+                                    >
+                                        <Text style={[styles.modalBtnText, { color: colors.textSecondary }]}>Annuler</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity
+                                        style={[
+                                            styles.modalBtn,
+                                            { backgroundColor: modal.destructive ? colors.error : colors.primary },
+                                        ]}
+                                        onPress={() => {
+                                            const action = modal.onConfirm;
+                                            setModal(null);
+                                            action?.();
+                                        }}
+                                    >
+                                        <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>{modal.confirmText}</Text>
+                                    </TouchableOpacity>
+                                </>
+                            ) : (
+                                <TouchableOpacity
+                                    style={[styles.modalBtn, { flex: 1, backgroundColor: colors.primary }]}
+                                    onPress={() => setModal(null)}
+                                >
+                                    <Text style={[styles.modalBtnText, { color: '#FFFFFF' }]}>OK</Text>
+                                </TouchableOpacity>
+                            )}
+                        </View>
+                    </View>
+                </View>
+            </Modal>
         </LinearGradient>
     );
 }
@@ -526,4 +570,44 @@ const createStyles = (colors: any) => StyleSheet.create({
         backgroundColor: colors.primary,
     },
     footerBranding: { textAlign: 'center', color: colors.textMuted, fontSize: 12, fontWeight: '600', marginTop: SPACING.xl, opacity: 0.6 },
+    // Modal styles
+    modalOverlay: {
+        flex: 1,
+        backgroundColor: 'rgba(0,0,0,0.65)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        padding: SPACING.lg,
+    },
+    modalBox: {
+        width: '100%',
+        maxWidth: 400,
+        borderRadius: BORDER_RADIUS.lg,
+        padding: SPACING.xl,
+        borderWidth: 1,
+    },
+    modalTitle: {
+        fontSize: 18,
+        fontWeight: '800',
+        marginBottom: SPACING.xs,
+    },
+    modalMessage: {
+        fontSize: 14,
+        lineHeight: 20,
+        marginBottom: SPACING.lg,
+    },
+    modalButtons: {
+        flexDirection: 'row',
+        gap: SPACING.sm,
+        marginTop: SPACING.sm,
+    },
+    modalBtn: {
+        flex: 1,
+        borderRadius: BORDER_RADIUS.sm,
+        paddingVertical: SPACING.sm + 2,
+        alignItems: 'center',
+    },
+    modalBtnText: {
+        fontSize: 14,
+        fontWeight: '700',
+    },
 });
