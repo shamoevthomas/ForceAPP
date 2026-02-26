@@ -52,13 +52,13 @@ function isToday(date: Date): boolean {
 }
 
 // ─── Progressive Overload Logic ──────────────────────────────────
-function calculateNextWeight(exercise: Exercise, completedSets: WorkoutSet[]): number {
-    const allSetsCompleted = completedSets.length >= exercise.target_sets;
-    const allRepsHit = completedSets.every(s => (s.reps || 0) >= exercise.target_reps);
+function calculateNextWeight(lastWeight: number, increment: number, targetSets: number, targetReps: number, completedSets: WorkoutSet[]): number {
+    const allSetsCompleted = completedSets.length >= targetSets;
+    const allRepsHit = completedSets.every(s => (s.reps || 0) >= targetReps);
     if (allSetsCompleted && allRepsHit) {
-        return exercise.current_weight_kg + parseFloat(exercise.weight_increment);
+        return lastWeight + increment;
     }
-    return exercise.current_weight_kg;
+    return lastWeight;
 }
 
 export default function ProgressionScreen() {
@@ -172,6 +172,7 @@ export default function ProgressionScreen() {
                     .eq('user_id', user.id)
                     .eq('program_day_id', matchedDay.id)
                     .eq('completed', true)
+                    .lte('workout_date', formatDate(new Date())) // Don't look at future logs
                     .order('workout_date', { ascending: false })
                     .limit(1)
                     .maybeSingle();
@@ -186,7 +187,14 @@ export default function ProgressionScreen() {
                         .order('set_number', { ascending: true });
 
                     if (lastSets && lastSets.length > 0) {
-                        const nextWeight = calculateNextWeight(ex, lastSets as WorkoutSet[]);
+                        const lastWeight = lastSets[0].weight_kg || 0;
+                        const nextWeight = calculateNextWeight(
+                            lastWeight,
+                            parseFloat(ex.weight_increment),
+                            ex.target_sets,
+                            ex.target_reps,
+                            lastSets as WorkoutSet[]
+                        );
                         setsMap.set(ex.id, Array.from({ length: ex.target_sets }, () => ({
                             weight: nextWeight.toString(),
                             reps: '',
@@ -314,7 +322,9 @@ export default function ProgressionScreen() {
             await supabase.rpc('calculate_force_grade', { p_user_id: user.id });
 
             const weightUpdates: Promise<any>[] = [];
-            if (!isSkipped) {
+            const isFuture = formatDate(selectedDate) > formatDate(new Date());
+
+            if (!isSkipped && !isFuture) {
                 sets.forEach((exSets, exerciseId) => {
                     for (let i = exSets.length - 1; i >= 0; i--) {
                         const s = exSets[i];
