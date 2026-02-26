@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
-    ScrollView, ActivityIndicator, Alert,
+    ScrollView, ActivityIndicator,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
@@ -27,6 +27,7 @@ export default function OnboardingScreen() {
     const [level, setLevel] = useState<ExperienceLevel | null>(null);
     const [gender, setGender] = useState<'male' | 'female' | null>(null);
     const [loading, setLoading] = useState(false);
+    const [errorMessage, setErrorMessage] = useState('');
 
     const steps = [
         {
@@ -164,6 +165,7 @@ export default function OnboardingScreen() {
         const [day, month, year] = birthDate.split('/');
         const isoBirthDate = `${year}-${month}-${day}`;
 
+        setErrorMessage('');
         setLoading(true);
         const { error } = await updateProfile({
             username,
@@ -176,7 +178,7 @@ export default function OnboardingScreen() {
         });
         setLoading(false);
         if (error) {
-            Alert.alert('Erreur', error.message || 'Une erreur est survenue.');
+            setErrorMessage(error.message || 'Une erreur est survenue. Réessaie.');
         }
     };
 
@@ -200,6 +202,12 @@ export default function OnboardingScreen() {
 
                 <View style={styles.content}>{currentStep.content}</View>
 
+                {!!errorMessage && (
+                    <View style={styles.errorBox}>
+                        <Text style={styles.errorText}>⚠️ {errorMessage}</Text>
+                    </View>
+                )}
+
                 <View style={styles.nav}>
                     {step > 0 && (
                         <TouchableOpacity style={styles.backButton} onPress={() => setStep(step - 1)}>
@@ -212,6 +220,7 @@ export default function OnboardingScreen() {
                         disabled={!currentStep.valid || loading}
                         onPress={() => {
                             if (step < steps.length - 1) {
+                                setErrorMessage('');
                                 setStep(step + 1);
                             } else {
                                 handleFinish();
@@ -294,6 +303,20 @@ const createStyles = (colors: any) => StyleSheet.create({
     levelLabel: { fontSize: 18, color: colors.text, fontWeight: '700' },
     levelLabelActive: { color: colors.primary },
     levelDesc: { fontSize: 14, color: colors.textSecondary },
+    errorBox: {
+        backgroundColor: '#EF444420',
+        borderRadius: BORDER_RADIUS.sm,
+        padding: SPACING.md,
+        marginTop: SPACING.md,
+        borderWidth: 1,
+        borderColor: '#EF444440',
+    },
+    errorText: {
+        color: '#EF4444',
+        fontSize: 14,
+        fontWeight: '600',
+        lineHeight: 20,
+    },
     nav: {
         flexDirection: 'row',
         justifyContent: 'flex-end',
