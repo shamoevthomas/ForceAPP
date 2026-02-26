@@ -40,6 +40,7 @@ export default function SettingsScreen() {
     // Password change
     const [newPassword, setNewPassword] = useState('');
     const [changingPassword, setChangingPassword] = useState(false);
+    const [deleting, setDeleting] = useState(false);
 
     const handleSaveWeight = async () => {
         const w = parseFloat(weight);
@@ -136,25 +137,35 @@ export default function SettingsScreen() {
     const handleDeleteAccount = () => {
         Alert.alert(
             '⚠️ Supprimer le compte',
-            'Cette action est IRRÉVERSIBLE. Toutes tes données seront définitivement supprimées.',
+            'Cette action est IRRÉVERSIBLE. Toutes tes données (entraînements, programmes, photos) seront définitivement supprimées.',
             [
                 { text: 'Annuler', style: 'cancel' },
                 {
                     text: 'Supprimer définitivement',
                     style: 'destructive',
-                    onPress: async () => {
-                        try {
-                            // Delete user profile (cascades to all data)
-                            if (user) {
-                                await supabase.from('users').delete().eq('id', user.id);
-                                // Delete auth user
-                                await supabase.auth.admin.deleteUser(user.id);
-                            }
-                            await signOut();
-                        } catch (err: any) {
-                            // Fallback: sign out even if delete fails
-                            await signOut();
-                        }
+                    onPress: () => {
+                        // Double confirmation
+                        Alert.alert(
+                            'Dernière confirmation',
+                            'Es-tu vraiment sûr ? Cette opération est irréversible.',
+                            [
+                                { text: 'Non, annuler', style: 'cancel' },
+                                {
+                                    text: 'Oui, supprimer',
+                                    style: 'destructive',
+                                    onPress: async () => {
+                                        setDeleting(true);
+                                        const { error } = await supabase.rpc('delete_user_account');
+                                        if (error) {
+                                            setDeleting(false);
+                                            Alert.alert('Erreur', error.message || 'Impossible de supprimer le compte.');
+                                            return;
+                                        }
+                                        await signOut();
+                                    },
+                                },
+                            ],
+                        );
                     },
                 },
             ],
@@ -329,8 +340,16 @@ export default function SettingsScreen() {
                         <Text style={styles.logoutText}>🚪 Se déconnecter</Text>
                     </TouchableOpacity>
 
-                    <TouchableOpacity style={styles.deleteButton} onPress={handleDeleteAccount}>
-                        <Text style={styles.deleteText}>🗑 Supprimer mon compte</Text>
+                    <TouchableOpacity
+                        style={[styles.deleteButton, deleting && { opacity: 0.6 }]}
+                        onPress={handleDeleteAccount}
+                        disabled={deleting}
+                    >
+                        {deleting ? (
+                            <ActivityIndicator color={colors.error} />
+                        ) : (
+                            <Text style={styles.deleteText}>🗑 Supprimer mon compte</Text>
+                        )}
                     </TouchableOpacity>
                 </View>
 
