@@ -62,8 +62,8 @@ function getFailureExId(userId: string, dateStr: string, exerciseIds: string[]):
         hash |= 0;
     }
     const absHash = Math.abs(hash);
-    // 30% chance of a failure day
-    if (absHash % 100 < 30) {
+    // 5% chance of a failure day
+    if (absHash % 100 < 5) {
         return exerciseIds[absHash % exerciseIds.length];
     }
     return null;

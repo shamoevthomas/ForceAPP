@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
     KeyboardAvoidingView, Platform, ActivityIndicator, Alert, Image,
+    TouchableWithoutFeedback, Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../contexts/AuthContext';
@@ -38,71 +39,75 @@ export default function AuthScreen() {
     return (
         <LinearGradient colors={[colors.background, isDark ? '#0D0D2B' : colors.cardLight, colors.backgroundLight]} style={styles.container}>
             <KeyboardAvoidingView
-                behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+                behavior={Platform.OS === 'ios' ? 'padding' : (Platform.OS === 'android' ? 'height' : undefined)}
                 style={styles.inner}
             >
-                <View style={styles.logoContainer}>
-                    <Image source={require('../../assets/logo.png')} style={styles.logoImage} />
-                    <Text style={styles.title}>FORCE</Text>
-                    <Text style={styles.subtitle}>Surcharge progressive automatisée</Text>
-                </View>
+                <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+                    <View style={{ flex: 1, justifyContent: 'center' }}>
+                        <View style={styles.logoContainer}>
+                            <Image source={require('../../assets/logo.png')} style={styles.logoImage} />
+                            <Text style={styles.title}>FORCE</Text>
+                            <Text style={styles.subtitle}>Surcharge progressive automatisée</Text>
+                        </View>
 
-                <View style={styles.formContainer}>
-                    <View style={styles.tabContainer}>
-                        <TouchableOpacity
-                            style={[styles.tab, isLogin && styles.tabActive]}
-                            onPress={() => setIsLogin(true)}
-                        >
-                            <Text style={[styles.tabText, isLogin && styles.tabTextActive]}>Connexion</Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                            style={[styles.tab, !isLogin && styles.tabActive]}
-                            onPress={() => setIsLogin(false)}
-                        >
-                            <Text style={[styles.tabText, !isLogin && styles.tabTextActive]}>Inscription</Text>
-                        </TouchableOpacity>
+                        <View style={styles.formContainer}>
+                            <View style={styles.tabContainer}>
+                                <TouchableOpacity
+                                    style={[styles.tab, isLogin && styles.tabActive]}
+                                    onPress={() => setIsLogin(true)}
+                                >
+                                    <Text style={[styles.tabText, isLogin && styles.tabTextActive]}>Connexion</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={[styles.tab, !isLogin && styles.tabActive]}
+                                    onPress={() => setIsLogin(false)}
+                                >
+                                    <Text style={[styles.tabText, !isLogin && styles.tabTextActive]}>Inscription</Text>
+                                </TouchableOpacity>
+                            </View>
+
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Email"
+                                placeholderTextColor={colors.textMuted}
+                                value={email}
+                                onChangeText={setEmail}
+                                keyboardType="email-address"
+                                autoCapitalize="none"
+                            />
+
+                            <TextInput
+                                style={styles.input}
+                                placeholder="Mot de passe"
+                                placeholderTextColor={colors.textMuted}
+                                value={password}
+                                onChangeText={setPassword}
+                                secureTextEntry
+                            />
+
+                            <TouchableOpacity
+                                style={styles.button}
+                                onPress={handleSubmit}
+                                disabled={loading}
+                            >
+                                <LinearGradient
+                                    colors={[colors.primary, colors.primaryDark]}
+                                    style={styles.buttonGradient}
+                                    start={{ x: 0, y: 0 }}
+                                    end={{ x: 1, y: 0 }}
+                                >
+                                    {loading ? (
+                                        <ActivityIndicator color="#FFFFFF" />
+                                    ) : (
+                                        <Text style={styles.buttonText}>
+                                            {isLogin ? 'Se connecter' : "S'inscrire"}
+                                        </Text>
+                                    )}
+                                </LinearGradient>
+                            </TouchableOpacity>
+                        </View>
                     </View>
-
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Email"
-                        placeholderTextColor={colors.textMuted}
-                        value={email}
-                        onChangeText={setEmail}
-                        keyboardType="email-address"
-                        autoCapitalize="none"
-                    />
-
-                    <TextInput
-                        style={styles.input}
-                        placeholder="Mot de passe"
-                        placeholderTextColor={colors.textMuted}
-                        value={password}
-                        onChangeText={setPassword}
-                        secureTextEntry
-                    />
-
-                    <TouchableOpacity
-                        style={styles.button}
-                        onPress={handleSubmit}
-                        disabled={loading}
-                    >
-                        <LinearGradient
-                            colors={[colors.primary, colors.primaryDark]}
-                            style={styles.buttonGradient}
-                            start={{ x: 0, y: 0 }}
-                            end={{ x: 1, y: 0 }}
-                        >
-                            {loading ? (
-                                <ActivityIndicator color="#FFFFFF" />
-                            ) : (
-                                <Text style={styles.buttonText}>
-                                    {isLogin ? 'Se connecter' : "S'inscrire"}
-                                </Text>
-                            )}
-                        </LinearGradient>
-                    </TouchableOpacity>
-                </View>
+                </TouchableWithoutFeedback>
             </KeyboardAvoidingView>
         </LinearGradient>
     );
