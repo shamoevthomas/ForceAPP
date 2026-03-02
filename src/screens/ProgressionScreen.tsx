@@ -497,11 +497,28 @@ export default function ProgressionScreen() {
                                                     <Text style={[styles.setNum, set.isAmrap && styles.setNumAmrap]}>{set.isAmrap ? '🔥' : si + 1}</Text>
                                                 </TouchableOpacity>
                                                 <View style={styles.inputWrapper}>
-                                                    <TextInput style={[styles.setInput, set.isAmrap && styles.setInputAmrap]} value={set.weight} onChangeText={(v) => updateSet(exercise.id, si, 'weight', v)} keyboardType="numeric" placeholderTextColor={colors.textMuted} />
+                                                    <TextInput
+                                                        style={[styles.setInput, set.isAmrap && styles.setInputAmrap]}
+                                                        value={set.weight}
+                                                        onChangeText={(v) => updateSet(exercise.id, si, 'weight', v)}
+                                                        onFocus={() => { if (set.weight === '0') updateSet(exercise.id, si, 'weight', ''); }}
+                                                        selectTextOnFocus
+                                                        keyboardType="numeric"
+                                                        placeholderTextColor={colors.textMuted}
+                                                    />
                                                     {si > 0 && <TouchableOpacity style={styles.pasteIcon} onPress={() => handlePaste(exercise.id, si)}><Text style={styles.pasteIconText}>📋</Text></TouchableOpacity>}
                                                 </View>
                                                 <View style={styles.inputWrapper}>
-                                                    <TextInput style={[styles.setInput, set.isAmrap && styles.setInputAmrap]} value={set.reps} onChangeText={(v) => updateSet(exercise.id, si, 'reps', v)} keyboardType="numeric" placeholder={exercise.target_reps.toString()} placeholderTextColor={colors.textMuted} />
+                                                    <TextInput
+                                                        style={[styles.setInput, set.isAmrap && styles.setInputAmrap]}
+                                                        value={set.reps}
+                                                        onChangeText={(v) => updateSet(exercise.id, si, 'reps', v)}
+                                                        onFocus={() => { if (set.reps === '0' || set.reps === '00') updateSet(exercise.id, si, 'reps', ''); }}
+                                                        selectTextOnFocus
+                                                        keyboardType="numeric"
+                                                        placeholder={exercise.target_reps.toString()}
+                                                        placeholderTextColor={colors.textMuted}
+                                                    />
                                                     {set.isAmrap && (
                                                         <View style={styles.amrapLabel}>
                                                             <Text style={styles.amrapLabelText}>À L'ÉCHEC</Text>
