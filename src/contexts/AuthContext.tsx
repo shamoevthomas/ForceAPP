@@ -2,6 +2,7 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Session, User } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { UserProfile } from '../types';
+import * as Notifications from '../services/NotificationService';
 
 interface AuthContextType {
     session: Session | null;
@@ -43,6 +44,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             console.log('Profile Fetched Successfully:', data);
             setProfile(data as UserProfile);
             setNeedsOnboarding(!data.username || !data.age || !data.experience_level);
+            // Schedule/Refresh notifications when profile is available
+            Notifications.scheduleDailyReminders(userId, data as UserProfile).catch(e => console.error('Notification Schedule Error:', e));
         }
     };
 
@@ -52,6 +55,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(session?.user ?? null);
             if (session?.user) {
                 fetchProfile(session.user.id);
+                Notifications.registerForPushNotificationsAsync();
             }
             setLoading(false);
         });

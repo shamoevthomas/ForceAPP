@@ -8,6 +8,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
+import * as Notifications from '../services/NotificationService';
 import { SPACING, BORDER_RADIUS } from '../constants/theme';
 import { Exercise, ProgramDayWithExercises, WorkoutLog, WorkoutSet } from '../types';
 
@@ -51,6 +52,23 @@ function isToday(date: Date): boolean {
     return formatDate(date) === formatDate(today);
 }
 
+// ─── Deterministic Randomness ────────────────────────────────────
+function getFailureExId(userId: string, dateStr: string, exerciseIds: string[]): string | null {
+    if (!exerciseIds.length) return null;
+    const seedStr = `${userId}-${dateStr}`;
+    let hash = 0;
+    for (let i = 0; i < seedStr.length; i++) {
+        hash = ((hash << 5) - hash) + seedStr.charCodeAt(i);
+        hash |= 0;
+    }
+    const absHash = Math.abs(hash);
+    // 30% chance of a failure day
+    if (absHash % 100 < 30) {
+        return exerciseIds[absHash % exerciseIds.length];
+    }
+    return null;
+}
+
 // ─── Progressive Overload Logic ──────────────────────────────────
 function calculateNextWeight(lastWeight: number, increment: number, targetSets: number, targetReps: number, completedSets: WorkoutSet[]): number {
     const allSetsCompleted = completedSets.length >= targetSets;
@@ -62,7 +80,7 @@ function calculateNextWeight(lastWeight: number, increment: number, targetSets: 
 }
 
 export default function ProgressionScreen() {
-    const { user } = useAuth();
+    const { user, profile } = useAuth();
     const { colors, isDark } = useTheme();
     const styles = createStyles(colors);
 
@@ -143,6 +161,7 @@ export default function ProgressionScreen() {
             .maybeSingle();
 
         const setsMap = new Map<string, { weight: string; reps: string; isAmrap: boolean }[]>();
+        const failureExId = getFailureExId(user.id, dateStr, matchedDay.exercises.map(e => e.id));
 
         if (log) {
             setWorkoutLog(log);
@@ -159,7 +178,7 @@ export default function ProgressionScreen() {
                         isAmrap: s.is_amrap || false,
                     })));
                 } else {
-                    setsMap.set(ex.id, generateDefaultSets(ex));
+                    setsMap.set(ex.id, generateDefaultSets(ex, ex.id === failureExId));
                 }
             }
         } else {
@@ -195,16 +214,16 @@ export default function ProgressionScreen() {
                             ex.target_reps,
                             lastSets as WorkoutSet[]
                         );
-                        setsMap.set(ex.id, Array.from({ length: ex.target_sets }, () => ({
+                        setsMap.set(ex.id, Array.from({ length: ex.target_sets }, (_, idx) => ({
                             weight: nextWeight.toString(),
                             reps: '',
-                            isAmrap: false,
+                            isAmrap: ex.id === failureExId && (idx === ex.target_sets - 1),
                         })));
                     } else {
-                        setsMap.set(ex.id, generateDefaultSets(ex));
+                        setsMap.set(ex.id, generateDefaultSets(ex, ex.id === failureExId));
                     }
                 } else {
-                    setsMap.set(ex.id, generateDefaultSets(ex));
+                    setsMap.set(ex.id, generateDefaultSets(ex, ex.id === failureExId));
                 }
             }
         }
@@ -212,11 +231,11 @@ export default function ProgressionScreen() {
         setLoading(false);
     }, [user]);
 
-    const generateDefaultSets = (ex: Exercise) => {
-        return Array.from({ length: ex.target_sets }, () => ({
+    const generateDefaultSets = (ex: Exercise, isAmrapLastSet: boolean = false) => {
+        return Array.from({ length: ex.target_sets }, (_, idx) => ({
             weight: ex.current_weight_kg.toString(),
             reps: '',
-            isAmrap: false,
+            isAmrap: isAmrapLastSet && (idx === ex.target_sets - 1),
         }));
     };
 
@@ -257,6 +276,14 @@ export default function ProgressionScreen() {
             newSets.set(exerciseId, exSets);
             setSets(newSets);
         }
+    };
+
+    const toggleAmrap = (exerciseId: string, setIndex: number) => {
+        const newSets = new Map(sets);
+        const exSets = [...(newSets.get(exerciseId) || [])];
+        exSets[setIndex] = { ...exSets[setIndex], isAmrap: !exSets[setIndex].isAmrap };
+        newSets.set(exerciseId, exSets);
+        setSets(newSets);
     };
 
     const updateSet = (exerciseId: string, setIndex: number, field: string, value: string) => {
@@ -320,6 +347,9 @@ export default function ProgressionScreen() {
 
             await supabase.rpc('calculate_streak', { p_user_id: user.id });
             await supabase.rpc('calculate_force_grade', { p_user_id: user.id });
+
+            // Refresh reminders after saving (to cancel upcoming reminders for today)
+            Notifications.scheduleDailyReminders(user, profile).catch(console.error);
 
             const weightUpdates: Promise<any>[] = [];
             const isFuture = formatDate(selectedDate) > formatDate(new Date());
@@ -463,13 +493,20 @@ export default function ProgressionScreen() {
                                         </View>
                                         {exSets.map((set, si) => (
                                             <View key={si} style={styles.setRow}>
-                                                <View style={styles.setNumCircle}><Text style={styles.setNum}>{si + 1}</Text></View>
+                                                <TouchableOpacity style={[styles.setNumCircle, set.isAmrap && styles.setNumCircleAmrap]} onPress={() => toggleAmrap(exercise.id, si)}>
+                                                    <Text style={[styles.setNum, set.isAmrap && styles.setNumAmrap]}>{set.isAmrap ? '🔥' : si + 1}</Text>
+                                                </TouchableOpacity>
                                                 <View style={styles.inputWrapper}>
-                                                    <TextInput style={styles.setInput} value={set.weight} onChangeText={(v) => updateSet(exercise.id, si, 'weight', v)} keyboardType="numeric" placeholderTextColor={colors.textMuted} />
+                                                    <TextInput style={[styles.setInput, set.isAmrap && styles.setInputAmrap]} value={set.weight} onChangeText={(v) => updateSet(exercise.id, si, 'weight', v)} keyboardType="numeric" placeholderTextColor={colors.textMuted} />
                                                     {si > 0 && <TouchableOpacity style={styles.pasteIcon} onPress={() => handlePaste(exercise.id, si)}><Text style={styles.pasteIconText}>📋</Text></TouchableOpacity>}
                                                 </View>
                                                 <View style={styles.inputWrapper}>
-                                                    <TextInput style={styles.setInput} value={set.reps} onChangeText={(v) => updateSet(exercise.id, si, 'reps', v)} keyboardType="numeric" placeholder={exercise.target_reps.toString()} placeholderTextColor={colors.textMuted} />
+                                                    <TextInput style={[styles.setInput, set.isAmrap && styles.setInputAmrap]} value={set.reps} onChangeText={(v) => updateSet(exercise.id, si, 'reps', v)} keyboardType="numeric" placeholder={exercise.target_reps.toString()} placeholderTextColor={colors.textMuted} />
+                                                    {set.isAmrap && (
+                                                        <View style={styles.amrapLabel}>
+                                                            <Text style={styles.amrapLabelText}>À L'ÉCHEC</Text>
+                                                        </View>
+                                                    )}
                                                 </View>
                                             </View>
                                         ))}
@@ -581,4 +618,10 @@ const createStyles = (colors: any) => StyleSheet.create({
     weekRowYearActive: { color: colors.primary },
     weekRowLabel: { fontSize: 16, fontWeight: '700', color: colors.text },
     weekRowLabelActive: { color: colors.primary },
+
+    setNumCircleAmrap: { backgroundColor: colors.accent + '20', borderColor: colors.accent, borderWidth: 1 },
+    setNumAmrap: { color: colors.accent },
+    setInputAmrap: { borderColor: colors.accent, backgroundColor: colors.accent + '05' },
+    amrapLabel: { position: 'absolute', top: -14, right: 0, backgroundColor: colors.accent, paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+    amrapLabelText: { color: '#FFF', fontSize: 8, fontWeight: '900' },
 });
