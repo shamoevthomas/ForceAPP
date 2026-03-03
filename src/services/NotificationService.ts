@@ -38,7 +38,7 @@ export async function registerForPushNotificationsAsync() {
 }
 
 export async function scheduleDailyReminders(user: any, profile: UserProfile | null) {
-    if (!user) return;
+    if (!user || Platform.OS === 'web') return; // Scheduling not available on Web/PWA without complex service worker
 
     // 1. Cancel existing notifications to avoid duplicates
     await Notifications.cancelAllScheduledNotificationsAsync();
@@ -74,10 +74,7 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
     const alreadyDone = log?.completed || log?.is_skipped;
 
     // 4. Schedule based on time
-    // Morning (7:00 AM) - Always schedule for the next 7 AM if not already past today's 7 AM
-    // (Actually, better to schedule repeating daily and let it happen)
-
-    // Morning: 7h00 - Salut [X], aujourd'hui c'est [seance] !
+    // Morning: 7h00
     await Notifications.scheduleNotificationAsync({
         content: {
             title: `Salut ${firstName} ! 🔥`,
@@ -93,9 +90,8 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
         },
     });
 
-    // Reminders only if not already done today
     if (!alreadyDone) {
-        // Reminder 16h00: Rappel tu dois aller faire [seance]
+        // Reminder 16h00
         await Notifications.scheduleNotificationAsync({
             content: {
                 title: `Rappel séance 🏋️‍♂️`,
@@ -111,7 +107,7 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
             },
         });
 
-        // Check 22h00: rassure moi [prénom], tu as fait [titre séance] ?
+        // Check 22h00
         await Notifications.scheduleNotificationAsync({
             content: {
                 title: `C'est fini pour aujourd'hui ? 💤`,
@@ -130,6 +126,31 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
 }
 
 export async function sendTestNotification() {
+    if (Platform.OS === 'web') {
+        const title = "Test de notification Force 🔔";
+        const body = "Super ! Si tu vois ça, c'est que les notifications locales fonctionnent sur ton navigateur. Note: Sur iPhone, l'app DOIT être ajoutée à l'écran d'accueil.";
+
+        // Check for browser support
+        if (!('Notification' in window)) {
+            alert(title + "\n\n" + body + "\n\n(Ton navigateur ne supporte pas les notifications natives, voici une alerte de secours)");
+            return;
+        }
+
+        if (Notification.permission === 'granted') {
+            new Notification(title, { body });
+        } else if (Notification.permission !== 'denied') {
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                new Notification(title, { body });
+            } else {
+                alert("Permission refusée. Active les notifications pour ce site.");
+            }
+        } else {
+            alert("Les notifications sont bloquées dans tes réglages navigateur.");
+        }
+        return;
+    }
+
     const { status } = await Notifications.getPermissionsAsync();
 
     if (status !== 'granted') {
