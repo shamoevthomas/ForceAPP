@@ -55,9 +55,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         supabase.auth.getSession().then(({ data: { session } }) => {
             setSession(session);
             setUser(session?.user ?? null);
+            // Request permission on app opening
+            Notifications.registerForPushNotificationsAsync().catch(console.error);
             if (session?.user) {
                 fetchProfile(session.user.id);
-                Notifications.registerForPushNotificationsAsync();
             }
             setLoading(false);
         });
@@ -67,6 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setUser(session?.user ?? null);
             if (session?.user) {
                 fetchProfile(session.user.id);
+                Notifications.registerForPushNotificationsAsync();
             } else {
                 setProfile(null);
                 setNeedsOnboarding(false);

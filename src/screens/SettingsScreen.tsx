@@ -9,7 +9,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { SPACING, BORDER_RADIUS } from '../constants/theme';
-import { scheduleDailyReminders, sendTestNotification } from '../services/NotificationService';
+import { scheduleDailyReminders } from '../services/NotificationService';
 
 type ModalConfig = {
     title: string;
@@ -32,7 +32,6 @@ export default function SettingsScreen() {
         return `${d}/${m}/${y}`;
     });
     const [modal, setModal] = useState<ModalConfig | null>(null);
-    const [testingNotifs, setTestingNotifs] = useState(false);
 
     const showAlert = (title: string, message: string) => setModal({ title, message });
     const showConfirm = (
@@ -401,29 +400,6 @@ export default function SettingsScreen() {
 
                 {/* Actions */}
                 <View style={styles.section}>
-                    <TouchableOpacity
-                        style={[styles.testNotifButton, testingNotifs && { opacity: 0.6 }]}
-                        onPress={async () => {
-                            setTestingNotifs(true);
-                            try {
-                                await sendTestNotification();
-                                // Refresh reminders while at it
-                                await scheduleDailyReminders(user, profile);
-                            } catch (err: any) {
-                                showAlert('Erreur Notifications', err.message);
-                            } finally {
-                                setTestingNotifs(false);
-                            }
-                        }}
-                        disabled={testingNotifs}
-                    >
-                        {testingNotifs ? (
-                            <ActivityIndicator size="small" color={colors.primary} />
-                        ) : (
-                            <Text style={styles.testNotifText}>🔔 Tester la notification</Text>
-                        )}
-                    </TouchableOpacity>
-
                     <TouchableOpacity style={styles.logoutButton} onPress={handleSignOut}>
                         <Text style={styles.logoutText}>🚪 Se déconnecter</Text>
                     </TouchableOpacity>
@@ -573,13 +549,6 @@ const createStyles = (colors: any) => StyleSheet.create({
         alignItems: 'center', marginBottom: SPACING.md,
     },
     logoutText: { color: colors.text, fontSize: 16, fontWeight: '600' },
-    testNotifButton: {
-        backgroundColor: colors.primary + '20',
-        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
-        alignItems: 'center', marginBottom: SPACING.md,
-        borderWidth: 1, borderColor: colors.primary + '40',
-    },
-    testNotifText: { color: colors.primary, fontSize: 16, fontWeight: '600' },
     resetButton: {
         backgroundColor: '#F59E0B20',
         borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
