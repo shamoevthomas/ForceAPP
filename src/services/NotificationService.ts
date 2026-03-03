@@ -82,6 +82,8 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
         content: {
             title: `Salut ${firstName} ! 🔥`,
             body: `C'est jour de ${workoutTitle} aujourd'hui. On donne tout !`,
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+            vibrate: [0, 250, 250, 250],
         },
         trigger: {
             type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
@@ -98,6 +100,8 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
             content: {
                 title: `Rappel séance 🏋️‍♂️`,
                 body: `N'oublie pas d'aller faire ${workoutTitle} ! La progression n'attend pas.`,
+                priority: Notifications.AndroidNotificationPriority.HIGH,
+                vibrate: [0, 250, 250, 250],
             },
             trigger: {
                 type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
@@ -112,6 +116,8 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
             content: {
                 title: `C'est fini pour aujourd'hui ? 💤`,
                 body: `Rassure-moi ${firstName}, tu as bien fait ${workoutTitle} ?`,
+                priority: Notifications.AndroidNotificationPriority.HIGH,
+                vibrate: [0, 250, 250, 250],
             },
             trigger: {
                 type: Notifications.SchedulableTriggerInputTypes.CALENDAR,
@@ -121,4 +127,26 @@ export async function scheduleDailyReminders(user: any, profile: UserProfile | n
             },
         });
     }
+}
+
+export async function sendTestNotification() {
+    const { status } = await Notifications.getPermissionsAsync();
+
+    if (status !== 'granted') {
+        const { status: newStatus } = await Notifications.requestPermissionsAsync();
+        if (newStatus !== 'granted') {
+            throw new Error("Permissions refusées. Si tu es sur iPhone (PWA), assure-toi d'avoir ajouté l'app à ton écran d'accueil, sinon les notifications ne sont pas autorisées par Apple.");
+        }
+    }
+
+    await Notifications.scheduleNotificationAsync({
+        content: {
+            title: "Test de notification Force 🔔",
+            body: "Super ! Si tu vois ça, c'est que les notifications fonctionnent. Note: Sur iPhone, l'app DOIT être ajoutée à l'écran d'accueil.",
+            sound: true,
+            priority: Notifications.AndroidNotificationPriority.HIGH,
+            vibrate: [0, 250, 250, 250],
+        },
+        trigger: null,
+    });
 }

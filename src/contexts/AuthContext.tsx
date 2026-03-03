@@ -45,7 +45,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             setProfile(data as UserProfile);
             setNeedsOnboarding(!data.username || !data.age || !data.experience_level);
             // Schedule/Refresh notifications when profile is available
-            Notifications.scheduleDailyReminders(userId, data as UserProfile).catch(e => console.error('Notification Schedule Error:', e));
+            if (user) {
+                Notifications.scheduleDailyReminders(user, data as UserProfile).catch(e => console.error('Notification Schedule Error:', e));
+            }
         }
     };
 
