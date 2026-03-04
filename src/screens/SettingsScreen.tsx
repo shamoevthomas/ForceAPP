@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
     ScrollView, ActivityIndicator, Image, Modal,
@@ -32,6 +32,17 @@ export default function SettingsScreen() {
         return `${d}/${m}/${y}`;
     });
     const [modal, setModal] = useState<ModalConfig | null>(null);
+
+    // Sync local state when profile arrives or changes (fixes stale initial state)
+    useEffect(() => {
+        if (profile?.current_weight_kg != null) {
+            setWeight(profile.current_weight_kg.toString());
+        }
+        if (profile?.birth_date) {
+            const [y, m, d] = profile.birth_date.split('-');
+            setBirthDate(`${d}/${m}/${y}`);
+        }
+    }, [profile]);
 
     const showAlert = (title: string, message: string) => setModal({ title, message });
     const showConfirm = (

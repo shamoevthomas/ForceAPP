@@ -100,14 +100,22 @@ function OnboardingStack() {
     const styles = createStyles(colors);
     const [hasProgram, setHasProgram] = React.useState(false);
     const [checkingProgram, setCheckingProgram] = React.useState(true);
-    const { user, needsOnboarding } = useAuth();
+    const { user, profile, needsOnboarding } = useAuth();
 
     React.useEffect(() => {
         checkProgram();
-    }, [needsOnboarding]);
+    }, [needsOnboarding, user, profile]);
 
     const checkProgram = async () => {
-        if (!user || needsOnboarding) {
+        // Don't check until profile has been loaded (profile is null before fetch completes)
+        if (!user || !profile) {
+            // If needsOnboarding is true, profile is null because the user row doesn't exist yet
+            if (needsOnboarding) {
+                setCheckingProgram(false);
+            }
+            return;
+        }
+        if (needsOnboarding) {
             setCheckingProgram(false);
             return;
         }

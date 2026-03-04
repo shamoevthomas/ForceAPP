@@ -52,27 +52,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     useEffect(() => {
-        supabase.auth.getSession().then(({ data: { session } }) => {
-            setSession(session);
-            setUser(session?.user ?? null);
-            // Request permission on app opening
-            Notifications.registerForPushNotificationsAsync().catch(console.error);
-            if (session?.user) {
-                fetchProfile(session.user.id);
-            }
-            setLoading(false);
-        });
-
-        const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+        // Use only onAuthStateChange — it fires INITIAL_SESSION first (Supabase v2+),
+        // eliminating the race condition between getSession() and onAuthStateChange().
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
             if (session?.user) {
-                fetchProfile(session.user.id);
-                Notifications.registerForPushNotificationsAsync();
+                // Await fetchProfile so profile is ready BEFORE loading becomes false
+                await fetchProfile(session.user.id);
+                Notifications.registerForPushNotificationsAsync().catch(console.error);
             } else {
                 setProfile(null);
                 setNeedsOnboarding(false);
             }
+            // Only set loading false AFTER profile is fetched
+            if (loading) setLoading(false);
         });
 
         return () => subscription.unsubscribe();

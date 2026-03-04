@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
@@ -35,7 +36,7 @@ export default function HomeScreen() {
     ];
 
     const fetchStats = useCallback(async () => {
-        if (!user) return;
+        if (!user || !profile) return;
 
         // Calculate streak
         const { data: streakData } = await supabase.rpc('calculate_streak', { p_user_id: user.id });
@@ -78,9 +79,13 @@ export default function HomeScreen() {
         }
 
         await refreshProfile();
-    }, [user, refreshProfile]);
+    }, [user, profile, refreshProfile]);
 
-    useEffect(() => { fetchStats(); }, [fetchStats]);
+    useFocusEffect(
+        useCallback(() => {
+            fetchStats();
+        }, [fetchStats])
+    );
 
     const onRefresh = async () => {
         setRefreshing(true);
