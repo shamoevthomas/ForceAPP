@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
-    Alert, ActivityIndicator, Modal, FlatList,
+    Alert, ActivityIndicator, Modal, FlatList, Switch,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
@@ -10,7 +10,7 @@ import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
 import { SPACING, BORDER_RADIUS } from '../constants/theme';
 import { WeightIncrement } from '../types';
-import DraggableFlatList, {
+import {
     ScaleDecorator,
     NestableScrollContainer,
     NestableDraggableFlatList,
@@ -47,6 +47,7 @@ interface DayInput {
     id: string;
     day_label: string;
     weekday_number: number;
+    is_rest_day: boolean;
     exercises: ExerciseInput[];
 }
 
@@ -55,6 +56,15 @@ const defaultExercise = (): ExerciseInput => ({
     name: '', target_sets: '4', target_reps: '12',
     current_weight_kg: '0', weight_increment: '2.5',
 });
+
+const defaultWeek = (): DayInput[] =>
+    WEEKDAYS.map(w => ({
+        id: nextKey(),
+        day_label: '',
+        weekday_number: w.id,
+        is_rest_day: w.id > 5,
+        exercises: [defaultExercise()],
+    }));
 
 interface ProgramCreationProps {
     onComplete: () => void;
@@ -66,7 +76,7 @@ interface ProgramCreationProps {
     };
 }
 
-// Small 6-dot drag handle icon
+// 6-dot drag handle
 const DragDots = ({ color }: { color: string }) => (
     <View style={{ gap: 3, paddingHorizontal: 5, paddingVertical: 4 }}>
         {[0, 1, 2].map(row => (
@@ -87,22 +97,32 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
 
     useEffect(() => {
         if (initialData && initialData.program_days) {
-            const formattedDays = initialData.program_days.map(d => ({
-                id: nextKey(),
-                day_label: d.day_label || '',
-                weekday_number: d.day_number,
-                exercises: d.exercises.map((e: any) => ({
+            const daysMap = new Map<number, DayInput>();
+            initialData.program_days.forEach(d => {
+                daysMap.set(d.day_number, {
                     id: nextKey(),
-                    name: e.name,
-                    target_sets: String(e.target_sets),
-                    target_reps: String(e.target_reps),
-                    current_weight_kg: String(e.current_weight_kg),
-                    weight_increment: e.weight_increment,
-                }))
+                    day_label: d.day_label || '',
+                    weekday_number: d.day_number,
+                    is_rest_day: !!d.is_rest_day,
+                    exercises: (d.exercises || []).map((e: any) => ({
+                        id: nextKey(),
+                        name: e.name,
+                        target_sets: String(e.target_sets),
+                        target_reps: String(e.target_reps),
+                        current_weight_kg: String(e.current_weight_kg),
+                        weight_increment: e.weight_increment,
+                    }))
+                });
+            });
+            setDays(WEEKDAYS.map(w => daysMap.get(w.id) || {
+                id: nextKey(),
+                day_label: '',
+                weekday_number: w.id,
+                is_rest_day: true,
+                exercises: [defaultExercise()],
             }));
-            setDays(formattedDays);
         } else {
-            setDays([{ id: nextKey(), day_label: 'Push', weekday_number: 1, exercises: [defaultExercise()] }]);
+            setDays(defaultWeek());
         }
     }, [initialData]);
 
@@ -110,10 +130,6 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
     const [loading, setLoading] = useState(false);
     const [scanning, setScanning] = useState(false);
     const [scanModal, setScanModal] = useState(false);
-
-    // Day picker modal
-    const [dayPickerVisible, setDayPickerVisible] = useState(false);
-    const [activeDayId, setActiveDayId] = useState<string | null>(null);
 
     // Surcharge picker modal
     const [surchargePickerVisible, setSurchargePickerVisible] = useState(false);
@@ -129,36 +145,12 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
         if (data) setHasExistingProgram(true);
     };
 
-    // ─── Days operations ────────────────────────────────────────────────
-    const addDay = () => {
-        const usedWeekdays = days.map(d => d.weekday_number);
-        let nextDay = 1;
-        for (let i = 1; i <= 7; i++) {
-            if (!usedWeekdays.includes(i)) { nextDay = i; break; }
-        }
-        setDays(prev => [...prev, { id: nextKey(), day_label: '', weekday_number: nextDay, exercises: [defaultExercise()] }]);
-    };
-
-    const removeDay = (dayId: string) => {
-        if (days.length <= 1) return;
-        setDays(prev => prev.filter(d => d.id !== dayId));
-    };
-
+    // ─── Day operations ───────────────────────────────────────────────────
     const updateDay = (dayId: string, field: string, value: any) => {
         setDays(prev => prev.map(day => day.id === dayId ? { ...day, [field]: value } : day));
     };
 
-    const openDayPicker = (dayId: string) => {
-        setActiveDayId(dayId);
-        setDayPickerVisible(true);
-    };
-
-    const selectWeekday = (weekdayId: number) => {
-        if (activeDayId) updateDay(activeDayId, 'weekday_number', weekdayId);
-        setDayPickerVisible(false);
-    };
-
-    // ─── Exercises operations ────────────────────────────────────────────
+    // ─── Exercise operations ──────────────────────────────────────────────
     const addExercise = (dayId: string) => {
         setDays(prev => prev.map(day =>
             day.id === dayId ? { ...day, exercises: [...day.exercises, defaultExercise()] } : day
@@ -215,7 +207,7 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                     setLoading(false);
                     if (!error) {
                         setHasExistingProgram(false);
-                        setDays([{ id: nextKey(), day_label: 'Push', weekday_number: 1, exercises: [defaultExercise()] }]);
+                        setDays(defaultWeek());
                         setProgramName('Mon Programme');
                         Alert.alert('✅ Programme réinitialisé');
                     }
@@ -240,14 +232,19 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                     messages: [
                         {
                             role: "system",
-                            content: `Tu es un assistant expert en musculation et vision. Ton unique but est de renvoyer du JSON valide.
+                            content: `Tu es un assistant expert en musculation et vision. Ton unique but est de renvoyer du JSON valide représentant un programme sur les 7 jours de la semaine (1=Lundi, 7=Dimanche).
+
+                            IMPORTANT : Tu DOIS renvoyer un objet pour CHAQUE jour de la semaine (7 jours au total).
+                            Si un jour n'est pas mentionné dans l'image ou s'il est explicitement écrit "Repos", "Rest", "Break", alors marque "is_rest_day": true.
+
                             Structure attendue :
                             {
                               "program_name": "...",
                               "program": [
                                 {
                                   "day_label": "Sous-titre de la séance (ex: Push, Pull, Leg Day)",
-                                  "weekday_number": 1-7 (1=Lundi, 7=Dimanche),
+                                  "weekday_number": 1-7,
+                                  "is_rest_day": boolean,
                                   "exercises": [
                                     { "name": "...", "sets": 4, "reps": 12, "weight": 0 }
                                   ]
@@ -272,20 +269,27 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
             if (!content) throw new Error("Aucun contenu reçu de l'IA.");
             const data = JSON.parse(content);
             if (data.program_name) setProgramName(data.program_name);
-            const formattedDays = (data.program || []).map((d: any, i: number) => ({
+            const scannedDays = (data.program || []).map((d: any, i: number) => ({
                 id: nextKey(),
                 day_label: d.day_label || '',
                 weekday_number: parseInt(d.weekday_number) || (i + 1),
+                is_rest_day: !!d.is_rest_day,
                 exercises: (d.exercises || []).map((e: any) => ({
                     id: nextKey(),
                     name: e.name || 'Inconnu',
                     target_sets: String(e.sets || 4),
                     target_reps: String(e.reps || 12),
                     current_weight_kg: String(e.weight || 0),
-                    weight_increment: '2.5',
+                    weight_increment: '2.5' as WeightIncrement,
                 })),
             }));
-            if (formattedDays.length > 0) setDays(formattedDays);
+            // Ensure all 7 days are present
+            const scannedMap = new Map<number, DayInput>(scannedDays.map((d: DayInput) => [d.weekday_number, d]));
+            const completeProgram: DayInput[] = WEEKDAYS.map(w => scannedMap.get(w.id) ?? {
+                id: nextKey(), day_label: '', weekday_number: w.id,
+                is_rest_day: true, exercises: [defaultExercise()],
+            });
+            setDays(completeProgram);
             setScanning(false); setScanModal(false);
             Alert.alert('✅ Analyse terminée');
         } catch (err: any) {
@@ -319,20 +323,22 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
             for (const day of days) {
                 const { data: programDay, error: dayError } = await supabase
                     .from('program_days')
-                    .insert({ program_id: programId, day_number: day.weekday_number, day_label: day.day_label })
+                    .insert({ program_id: programId, day_number: day.weekday_number, day_label: day.day_label, is_rest_day: day.is_rest_day })
                     .select().single();
                 if (dayError) throw dayError;
-                const exercises = day.exercises.map((ex, j) => ({
-                    program_day_id: programDay.id,
-                    name: ex.name,
-                    target_sets: parseInt(ex.target_sets) || 4,
-                    target_reps: parseInt(ex.target_reps) || 12,
-                    current_weight_kg: parseFloat(ex.current_weight_kg) || 0,
-                    weight_increment: ex.weight_increment,
-                    sort_order: j,
-                }));
-                const { error: exError } = await supabase.from('exercises').insert(exercises);
-                if (exError) throw exError;
+                if (!day.is_rest_day) {
+                    const exercises = day.exercises.map((ex, j) => ({
+                        program_day_id: programDay.id,
+                        name: ex.name,
+                        target_sets: parseInt(ex.target_sets) || 4,
+                        target_reps: parseInt(ex.target_reps) || 12,
+                        current_weight_kg: parseFloat(ex.current_weight_kg) || 0,
+                        weight_increment: ex.weight_increment,
+                        sort_order: j,
+                    }));
+                    const { error: exError } = await supabase.from('exercises').insert(exercises);
+                    if (exError) throw exError;
+                }
             }
             onComplete();
         } catch (err: any) {
@@ -342,7 +348,7 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
         }
     };
 
-    // ─── Render exercise item ─────────────────────────────────────────────
+    // ─── Render exercise item (with drag handle) ──────────────────────────
     const renderExerciseItem = (dayId: string) =>
         ({ item: ex, drag, isActive }: RenderItemParams<ExerciseInput>) => (
             <ScaleDecorator activeScale={1.02}>
@@ -401,52 +407,6 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
             </ScaleDecorator>
         );
 
-    // ─── Render day item ──────────────────────────────────────────────────
-    const renderDayItem = ({ item: day, drag, isActive }: RenderItemParams<DayInput>) => (
-        <ScaleDecorator activeScale={1.01}>
-            <View style={[styles.dayCard, isActive && styles.dayCardActive]}>
-                <View style={styles.dayTopRow}>
-                    <TouchableOpacity
-                        onLongPress={drag}
-                        delayLongPress={150}
-                        style={styles.dayDragHandle}
-                        hitSlop={{ top: 8, bottom: 8, left: 4, right: 4 }}
-                    >
-                        <DragDots color={colors.textMuted} />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={styles.dayPickerBtn} onPress={() => openDayPicker(day.id)}>
-                        <Text style={styles.dayPickerLabel}>Jour</Text>
-                        <Text style={styles.dayPickerValue}>
-                            {WEEKDAYS.find(w => w.id === day.weekday_number)?.label || 'Choisir'}
-                        </Text>
-                    </TouchableOpacity>
-                    <TextInput
-                        style={styles.subtitleInput}
-                        value={day.day_label}
-                        onChangeText={(v) => updateDay(day.id, 'day_label', v)}
-                        placeholder="Sous-titre (ex: Push)"
-                        placeholderTextColor={colors.textMuted}
-                    />
-                    <TouchableOpacity style={styles.removeDayBtn} onPress={() => removeDay(day.id)}>
-                        <Text style={styles.removeDayText}>✕</Text>
-                    </TouchableOpacity>
-                </View>
-
-                <NestableDraggableFlatList
-                    data={day.exercises}
-                    keyExtractor={(ex) => ex.id}
-                    renderItem={renderExerciseItem(day.id)}
-                    onDragEnd={({ data }) => reorderExercises(day.id, data)}
-                    scrollEnabled={false}
-                />
-
-                <TouchableOpacity style={styles.addExButton} onPress={() => addExercise(day.id)}>
-                    <Text style={styles.addExText}>+ Ajouter un exercice</Text>
-                </TouchableOpacity>
-            </View>
-        </ScaleDecorator>
-    );
-
     return (
         <LinearGradient colors={[colors.background, isDark ? '#0D0D2B' : colors.cardLight]} style={styles.container}>
             <NestableScrollContainer contentContainerStyle={styles.scroll} keyboardShouldPersistTaps="handled">
@@ -481,18 +441,52 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                     placeholderTextColor={colors.textMuted}
                 />
 
-                <NestableDraggableFlatList
-                    data={days}
-                    keyExtractor={(item) => item.id}
-                    renderItem={renderDayItem}
-                    onDragEnd={({ data }) => setDays(data)}
-                    scrollEnabled={false}
-                    containerStyle={{ overflow: 'visible' }}
-                />
+                {days.map((day) => (
+                    <View key={day.id} style={styles.dayCard}>
+                        <View style={styles.dayTopRow}>
+                            <View style={[styles.dayPickerBtn, { backgroundColor: colors.background }]}>
+                                <Text style={styles.dayPickerLabel}>Jour</Text>
+                                <Text style={styles.dayPickerValue}>
+                                    {WEEKDAYS.find(w => w.id === day.weekday_number)?.label}
+                                </Text>
+                            </View>
+                            <TextInput
+                                style={[styles.subtitleInput, day.is_rest_day && { opacity: 0.5 }]}
+                                value={day.day_label}
+                                onChangeText={(v) => updateDay(day.id, 'day_label', v)}
+                                placeholder={day.is_rest_day ? 'Repos' : 'Sous-titre (ex: Push)'}
+                                placeholderTextColor={colors.textMuted}
+                                editable={!day.is_rest_day}
+                            />
+                            <View style={styles.restToggleContainer}>
+                                <Text style={styles.restToggleLabel}>Repos</Text>
+                                <Switch
+                                    value={day.is_rest_day}
+                                    onValueChange={(v) => updateDay(day.id, 'is_rest_day', v)}
+                                    trackColor={{ false: colors.border, true: colors.primary + '80' }}
+                                    thumbColor={day.is_rest_day ? colors.primary : '#f4f3f4'}
+                                />
+                            </View>
+                        </View>
 
-                <TouchableOpacity style={styles.addDayButton} onPress={addDay}>
-                    <Text style={styles.addDayText}>+ Ajouter une séance</Text>
-                </TouchableOpacity>
+                        {!day.is_rest_day && (
+                            <>
+                                <NestableDraggableFlatList
+                                    data={day.exercises}
+                                    keyExtractor={(ex) => ex.id}
+                                    renderItem={renderExerciseItem(day.id)}
+                                    onDragEnd={({ data }) => reorderExercises(day.id, data)}
+                                    scrollEnabled={false}
+                                />
+                                <TouchableOpacity style={styles.addExButton} onPress={() => addExercise(day.id)}>
+                                    <Text style={styles.addExText}>+ Ajouter un exercice</Text>
+                                </TouchableOpacity>
+                            </>
+                        )}
+                    </View>
+                ))}
+
+                <View style={{ marginBottom: SPACING.lg }} />
 
                 <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={loading}>
                     <LinearGradient colors={[colors.primary, colors.primaryDark]} style={styles.saveGradient}>
@@ -509,27 +503,6 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                     </TouchableOpacity>
                 )}
             </NestableScrollContainer>
-
-            {/* Day Picker Modal */}
-            <Modal visible={dayPickerVisible} transparent animationType="fade">
-                <View style={styles.modalOverlay}>
-                    <View style={styles.pickerContent}>
-                        <Text style={styles.pickerTitle}>Sélectionner un jour</Text>
-                        <FlatList
-                            data={WEEKDAYS}
-                            keyExtractor={(item) => item.id.toString()}
-                            renderItem={({ item }) => (
-                                <TouchableOpacity style={styles.pickerRow} onPress={() => selectWeekday(item.id)}>
-                                    <Text style={styles.pickerRowText}>{item.label}</Text>
-                                </TouchableOpacity>
-                            )}
-                        />
-                        <TouchableOpacity style={styles.pickerClose} onPress={() => setDayPickerVisible(false)}>
-                            <Text style={styles.pickerCloseText}>Annuler</Text>
-                        </TouchableOpacity>
-                    </View>
-                </View>
-            </Modal>
 
             {/* Surcharge Picker Modal */}
             <Modal visible={surchargePickerVisible} transparent animationType="fade">
@@ -605,25 +578,10 @@ const createStyles = (colors: any) => StyleSheet.create({
         padding: SPACING.md, marginBottom: SPACING.md,
         borderWidth: 1, borderColor: colors.border,
     },
-    dayCardActive: {
-        borderColor: colors.primary,
-        shadowColor: colors.primary,
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.3,
-        shadowRadius: 8,
-        elevation: 8,
-    },
     dayTopRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, marginBottom: SPACING.md },
-    dayDragHandle: {
-        paddingVertical: 6,
-        paddingHorizontal: 2,
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
     dayPickerBtn: {
-        backgroundColor: colors.backgroundLight, paddingHorizontal: 12,
-        paddingVertical: 8, borderRadius: 8, borderWidth: 1,
-        borderColor: colors.border, minWidth: 90,
+        paddingHorizontal: 12, paddingVertical: 8, borderRadius: 8,
+        borderWidth: 1, borderColor: colors.border, minWidth: 90,
     },
     dayPickerLabel: { fontSize: 9, color: colors.textSecondary, fontWeight: '700', textTransform: 'uppercase' },
     dayPickerValue: { fontSize: 13, color: colors.primary, fontWeight: '800', marginTop: 1 },
@@ -632,8 +590,8 @@ const createStyles = (colors: any) => StyleSheet.create({
         paddingHorizontal: 12, paddingVertical: 8, fontSize: 14,
         color: colors.text, borderWidth: 1, borderColor: colors.border,
     },
-    removeDayBtn: { padding: 4 },
-    removeDayText: { color: colors.error, fontSize: 20 },
+    restToggleContainer: { alignItems: 'center' },
+    restToggleLabel: { fontSize: 9, color: colors.textSecondary, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
 
     exerciseCard: {
         backgroundColor: colors.backgroundLight, borderRadius: BORDER_RADIUS.sm,
@@ -681,12 +639,6 @@ const createStyles = (colors: any) => StyleSheet.create({
     addExButton: { paddingVertical: SPACING.xs, alignItems: 'center' },
     addExText: { color: colors.primary, fontSize: 13, fontWeight: '600' },
 
-    addDayButton: {
-        paddingVertical: SPACING.md, alignItems: 'center', borderWidth: 1,
-        borderColor: colors.border, borderStyle: 'dashed',
-        borderRadius: BORDER_RADIUS.md, marginBottom: SPACING.lg,
-    },
-    addDayText: { color: colors.primary, fontSize: 14, fontWeight: '600' },
     saveButton: { borderRadius: BORDER_RADIUS.sm, overflow: 'hidden' },
     saveGradient: { paddingVertical: SPACING.md, alignItems: 'center' },
     saveButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '700' },
