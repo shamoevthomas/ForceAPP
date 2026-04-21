@@ -113,6 +113,9 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
     const [surchargePickerVisible, setSurchargePickerVisible] = useState(false);
     const [activeExInfo, setActiveExInfo] = useState<{ dayIndex: number, exIndex: number } | null>(null);
 
+    const [moveModal, setMoveModal] = useState(false);
+    const [moveSource, setMoveSource] = useState<{ dayIndex: number; exIndex: number } | null>(null);
+
     useEffect(() => {
         checkExistingProgram();
     }, [user]);
@@ -188,6 +191,39 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
         ));
     };
 
+    const openMoveModal = (dayIndex: number, exIndex: number) => {
+        setMoveSource({ dayIndex, exIndex });
+        setMoveModal(true);
+    };
+
+    const moveExerciseInDay = (direction: 'up' | 'down') => {
+        if (!moveSource) return;
+        const { dayIndex, exIndex } = moveSource;
+        const newIdx = direction === 'up' ? exIndex - 1 : exIndex + 1;
+        if (newIdx < 0 || newIdx >= days[dayIndex].exercises.length) return;
+        setDays(prev => {
+            const next = prev.map(d => ({ ...d, exercises: [...d.exercises] }));
+            const exs = next[dayIndex].exercises;
+            [exs[exIndex], exs[newIdx]] = [exs[newIdx], exs[exIndex]];
+            return next;
+        });
+        setMoveSource({ dayIndex, exIndex: newIdx });
+    };
+
+    const moveExerciseToDayEnd = (toDayIndex: number) => {
+        if (!moveSource) return;
+        const { dayIndex: fromDay, exIndex: fromEx } = moveSource;
+        setDays(prev => {
+            const next = prev.map(d => ({ ...d, exercises: [...d.exercises] }));
+            const [ex] = next[fromDay].exercises.splice(fromEx, 1);
+            if (next[fromDay].exercises.length === 0) next[fromDay].exercises = [defaultExercise()];
+            next[toDayIndex].exercises.push(ex);
+            return next;
+        });
+        setMoveModal(false);
+        setMoveSource(null);
+    };
+
     const handleReset = async () => {
         Alert.alert(
             '🗑 Réinitialiser ?',
@@ -207,7 +243,7 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                         setLoading(false);
                         if (!error) {
                             setHasExistingProgram(false);
-                            setDays([{ day_label: 'Push', weekday_number: 1, exercises: [defaultExercise()] }]);
+                            setDays(WEEKDAYS.map(w => ({ day_label: '', weekday_number: w.id, is_rest_day: w.id > 5, exercises: [defaultExercise()] })));
                             setProgramName('Mon Programme');
                             Alert.alert('✅ Programme réinitialisé');
                         }
@@ -458,8 +494,9 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                             <>
 
                                 {day.exercises.map((ex, exIndex) => (
-                                    <View key={exIndex} style={styles.exerciseCard}>
+                                    <TouchableOpacity key={exIndex} style={styles.exerciseCard} onLongPress={() => openMoveModal(dayIndex, exIndex)} delayLongPress={300} activeOpacity={0.95}>
                                         <View style={styles.exerciseHeader}>
+                                            <Text style={styles.dragHandle}>⠿</Text>
                                             <TextInput style={styles.exerciseNameInput} placeholder="Nom de l'exercice" value={ex.name} onChangeText={(v) => updateExercise(dayIndex, exIndex, 'name', v)} placeholderTextColor={colors.textMuted} />
                                             <TouchableOpacity onPress={() => removeExercise(dayIndex, exIndex)}><Text style={styles.deleteExText}>✕</Text></TouchableOpacity>
                                         </View>
@@ -483,7 +520,7 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                                                 </TouchableOpacity>
                                             </View>
                                         </View>
-                                    </View>
+                                    </TouchableOpacity>
                                 ))}
                                 <TouchableOpacity style={styles.addExButton} onPress={() => addExercise(dayIndex)}><Text style={styles.addExText}>+ Ajouter un exercice</Text></TouchableOpacity>
                             </>
@@ -561,6 +598,54 @@ export default function ProgramCreationScreen({ onComplete, onBack, initialData 
                         </TouchableOpacity>
                     </View>
                 </View>
+            </Modal>
+
+            {/* Move Exercise Modal */}
+            <Modal visible={moveModal} transparent animationType="slide" onRequestClose={() => { setMoveModal(false); setMoveSource(null); }}>
+                <TouchableOpacity style={[styles.modalOverlay, { justifyContent: 'flex-end', alignItems: 'stretch' }]} activeOpacity={1} onPress={() => { setMoveModal(false); setMoveSource(null); }}>
+                    <TouchableOpacity activeOpacity={1} style={styles.moveModalContent}>
+                        <View style={styles.moveModalHandle} />
+                        <Text style={styles.moveModalTitle}>Déplacer l'exercice</Text>
+                        {moveSource && (
+                            <Text style={styles.moveModalSubtitle} numberOfLines={1}>
+                                {days[moveSource.dayIndex]?.exercises[moveSource.exIndex]?.name || 'Sans nom'}
+                            </Text>
+                        )}
+
+                        <Text style={styles.moveSectionLabel}>DANS CE JOUR</Text>
+                        <View style={styles.moveInDayRow}>
+                            <TouchableOpacity
+                                style={[styles.moveBtn, (!moveSource || moveSource.exIndex === 0) && styles.moveBtnDisabled]}
+                                onPress={() => moveExerciseInDay('up')}
+                                disabled={!moveSource || moveSource.exIndex === 0}
+                            >
+                                <Text style={styles.moveBtnText}>↑  Monter</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.moveBtn, (!moveSource || !days[moveSource.dayIndex] || moveSource.exIndex >= days[moveSource.dayIndex].exercises.length - 1) && styles.moveBtnDisabled]}
+                                onPress={() => moveExerciseInDay('down')}
+                                disabled={!moveSource || !days[moveSource.dayIndex] || moveSource.exIndex >= days[moveSource.dayIndex].exercises.length - 1}
+                            >
+                                <Text style={styles.moveBtnText}>↓  Descendre</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.moveSectionLabel}>VERS UN AUTRE JOUR</Text>
+                        {days.map((d, dIdx) => {
+                            if (d.is_rest_day || dIdx === moveSource?.dayIndex) return null;
+                            const label = WEEKDAYS.find(w => w.id === d.weekday_number)?.label;
+                            return (
+                                <TouchableOpacity key={dIdx} style={styles.moveDayBtn} onPress={() => moveExerciseToDayEnd(dIdx)}>
+                                    <Text style={styles.moveDayBtnText}>→  {label}{d.day_label ? `  —  ${d.day_label}` : ''}</Text>
+                                </TouchableOpacity>
+                            );
+                        })}
+
+                        <TouchableOpacity style={styles.moveCancelBtn} onPress={() => { setMoveModal(false); setMoveSource(null); }}>
+                            <Text style={styles.moveCancelText}>Annuler</Text>
+                        </TouchableOpacity>
+                    </TouchableOpacity>
+                </TouchableOpacity>
             </Modal>
 
             {/* Scanning Modal */}
@@ -712,4 +797,40 @@ const createStyles = (colors: any) => StyleSheet.create({
     pickerRowText: { fontSize: 16, color: colors.text, textAlign: 'center' },
     pickerClose: { marginTop: SPACING.md, padding: SPACING.sm },
     pickerCloseText: { color: colors.error, fontSize: 15, fontWeight: '600', textAlign: 'center' },
+
+    dragHandle: { fontSize: 18, color: colors.textMuted, paddingRight: 8, paddingTop: 1 },
+    moveModalContent: {
+        backgroundColor: colors.card,
+        borderTopLeftRadius: 24,
+        borderTopRightRadius: 24,
+        padding: SPACING.xl,
+        paddingBottom: 40,
+        width: '100%',
+        position: 'absolute',
+        bottom: 0,
+    },
+    moveModalHandle: {
+        width: 40, height: 4, borderRadius: 2,
+        backgroundColor: colors.border,
+        alignSelf: 'center', marginBottom: SPACING.md,
+    },
+    moveModalTitle: { fontSize: 18, fontWeight: '800', color: colors.text, marginBottom: 4 },
+    moveModalSubtitle: { fontSize: 13, color: colors.textSecondary, marginBottom: SPACING.lg },
+    moveSectionLabel: { fontSize: 10, fontWeight: '800', color: colors.textMuted, letterSpacing: 1, marginBottom: SPACING.sm, marginTop: SPACING.sm },
+    moveInDayRow: { flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.xs },
+    moveBtn: {
+        flex: 1, backgroundColor: colors.backgroundLight,
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
+        alignItems: 'center', borderWidth: 1, borderColor: colors.border,
+    },
+    moveBtnDisabled: { opacity: 0.3 },
+    moveBtnText: { color: colors.text, fontWeight: '700', fontSize: 15 },
+    moveDayBtn: {
+        backgroundColor: colors.backgroundLight,
+        borderRadius: BORDER_RADIUS.sm, padding: SPACING.md,
+        marginBottom: SPACING.xs, borderWidth: 1, borderColor: colors.border,
+    },
+    moveDayBtnText: { color: colors.primary, fontWeight: '700', fontSize: 14 },
+    moveCancelBtn: { marginTop: SPACING.md, alignItems: 'center', padding: SPACING.md },
+    moveCancelText: { color: colors.textSecondary, fontWeight: '600', fontSize: 15 },
 });
