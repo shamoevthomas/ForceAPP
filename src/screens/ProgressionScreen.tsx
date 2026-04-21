@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
     ScrollView, Alert, ActivityIndicator, RefreshControl, Modal, FlatList, Switch,
 } from 'react-native';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import * as FileSystem from 'expo-file-system/legacy';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
@@ -102,6 +105,16 @@ export default function ProgressionScreen() {
     const [workoutLog, setWorkoutLog] = useState<WorkoutLog | null>(null);
     const [sets, setSets] = useState<Map<string, { weight: string; reps: string; isAmrap: boolean }[]>>(new Map());
     const [isSkipped, setIsSkipped] = useState(false);
+    const [savedRecently, setSavedRecently] = useState(false);
+    const [exportModalVisible, setExportModalVisible] = useState(false);
+    const [exportPeriodType, setExportPeriodType] = useState<'weeks' | 'months'>('weeks');
+    const [exportAmount, setExportAmount] = useState(4);
+    const [exportFormat, setExportFormat] = useState<'csv' | 'pdf'>('csv');
+    const [exporting, setExporting] = useState(false);
+    const isSavingRef = useRef(false);
+    const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isDirtyRef = useRef(false);
+    const handleSaveRef = useRef<(skippedOverride?: boolean, updateLocalState?: boolean) => Promise<void>>(async () => {});
 
     const datesToDisplay = useMemo(() => getDatesForTwoWeeks(currentWeek, currentYear), [currentWeek, currentYear]);
 
@@ -137,6 +150,7 @@ export default function ProgressionScreen() {
 
     const fetchWorkout = useCallback(async (date: Date, allProgramDays: ProgramDayWithExercises[]) => {
         if (!user) return;
+        isDirtyRef.current = false;
         setLoading(true);
         const dateStr = formatDate(date);
         const dayOfWeek = date.getDay() || 7;
@@ -249,15 +263,23 @@ export default function ProgressionScreen() {
     useFocusEffect(
         useCallback(() => {
             loadAll();
+            return () => {
+                if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+                if (isDirtyRef.current) handleSaveRef.current(undefined, false);
+            };
         }, [loadAll])
     );
 
     const handleDateSelect = (date: Date) => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        if (isDirtyRef.current) handleSaveRef.current(undefined, false);
         setSelectedDate(date);
         fetchWorkout(date, programDays);
     };
 
     const handleWeekSelect = (week: number, year: number) => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        if (isDirtyRef.current) handleSaveRef.current(undefined, false);
         setCurrentWeek(week);
         setCurrentYear(year);
         const start = getStartOfWeek(week, year);
@@ -268,6 +290,7 @@ export default function ProgressionScreen() {
 
     const handlePaste = (exerciseId: string, setIndex: number) => {
         if (setIndex === 0) return;
+        isDirtyRef.current = true;
         const newSets = new Map(sets);
         const exSets = [...(newSets.get(exerciseId) || [])];
         const prevSet = exSets[setIndex - 1];
@@ -279,6 +302,7 @@ export default function ProgressionScreen() {
     };
 
     const toggleAmrap = (exerciseId: string, setIndex: number) => {
+        isDirtyRef.current = true;
         const newSets = new Map(sets);
         const exSets = [...(newSets.get(exerciseId) || [])];
         exSets[setIndex] = { ...exSets[setIndex], isAmrap: !exSets[setIndex].isAmrap };
@@ -287,6 +311,7 @@ export default function ProgressionScreen() {
     };
 
     const updateSet = (exerciseId: string, setIndex: number, field: string, value: string) => {
+        isDirtyRef.current = true;
         const newSets = new Map(sets);
         const exSets = [...(newSets.get(exerciseId) || [])];
         exSets[setIndex] = { ...exSets[setIndex], [field]: value };
@@ -294,16 +319,18 @@ export default function ProgressionScreen() {
         setSets(newSets);
     };
 
-    const handleSave = async () => {
-        if (!user || !activeProgramDay) return;
+    const handleSave = async (skippedOverride?: boolean, updateLocalState = true) => {
+        if (!user || !activeProgramDay || isSavingRef.current) return;
+        isSavingRef.current = true;
         setSaving(true);
+        const effectiveSkipped = skippedOverride !== undefined ? skippedOverride : isSkipped;
         try {
             const dateStr = formatDate(selectedDate);
             let logId;
             if (workoutLog) {
                 const { data, error } = await supabase
                     .from('workout_logs')
-                    .update({ completed: !isSkipped, is_skipped: isSkipped })
+                    .update({ completed: !effectiveSkipped, is_skipped: effectiveSkipped })
                     .eq('id', workoutLog.id)
                     .select().single();
                 if (error) throw error;
@@ -316,15 +343,16 @@ export default function ProgressionScreen() {
                         user_id: user.id,
                         program_day_id: activeProgramDay.id,
                         workout_date: dateStr,
-                        completed: !isSkipped,
-                        is_skipped: isSkipped,
+                        completed: !effectiveSkipped,
+                        is_skipped: effectiveSkipped,
                     })
                     .select().single();
                 if (error) throw error;
                 logId = data.id;
+                if (updateLocalState) setWorkoutLog(data as WorkoutLog);
             }
 
-            if (!isSkipped) {
+            if (!effectiveSkipped) {
                 const allSetsArr: any[] = [];
                 sets.forEach((exSets, exerciseId) => {
                     exSets.forEach((s, idx) => {
@@ -347,23 +375,18 @@ export default function ProgressionScreen() {
 
             await supabase.rpc('calculate_streak', { p_user_id: user.id });
             await supabase.rpc('calculate_force_grade', { p_user_id: user.id });
-
-            // Refresh reminders after saving (to cancel upcoming reminders for today)
             Notifications.scheduleDailyReminders(user, profile).catch(console.error);
 
             const weightUpdates: Promise<any>[] = [];
             const isFuture = formatDate(selectedDate) > formatDate(new Date());
-
-            if (!isSkipped && !isFuture) {
+            if (!effectiveSkipped && !isFuture) {
                 sets.forEach((exSets, exerciseId) => {
                     for (let i = exSets.length - 1; i >= 0; i--) {
                         const s = exSets[i];
                         const repsAchieved = parseInt(s.reps) || 0;
                         const weightUsed = parseFloat(s.weight) || 0;
                         const targetReps = activeProgramDay.exercises.find(e => e.id === exerciseId)?.target_reps || 12;
-
                         if (weightUsed > 0 && repsAchieved >= (targetReps - 1)) {
-                            // Wrap in Promise.resolve to satisfy the type system if needed
                             const up = supabase
                                 .from('exercises')
                                 .update({ current_weight_kg: weightUsed })
@@ -374,15 +397,127 @@ export default function ProgressionScreen() {
                     }
                 });
             }
-
             if (weightUpdates.length > 0) await Promise.all(weightUpdates);
 
-            Alert.alert(isSkipped ? '😴 Séance enregistrée comme sautée' : '✅ Séance sauvegardée !');
-            fetchWorkout(selectedDate, programDays);
+            isDirtyRef.current = false;
+            if (updateLocalState) {
+                setSavedRecently(true);
+                setTimeout(() => setSavedRecently(false), 2000);
+            }
         } catch (err: any) {
             Alert.alert('Erreur', err.message);
         } finally {
             setSaving(false);
+            isSavingRef.current = false;
+        }
+    };
+    handleSaveRef.current = handleSave;
+
+    const triggerAutoSave = () => {
+        if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = setTimeout(() => handleSave(), 300);
+    };
+
+    // ─── Export ───────────────────────────────────────────────────
+    const getExportDateRange = () => {
+        const end = new Date();
+        const start = new Date();
+        if (exportPeriodType === 'weeks') {
+            start.setDate(start.getDate() - exportAmount * 7);
+        } else {
+            start.setMonth(start.getMonth() - exportAmount);
+        }
+        return { start, end };
+    };
+
+    const fetchExportData = async (start: Date, end: Date) => {
+        const { data, error } = await supabase
+            .from('workout_logs')
+            .select(`
+                workout_date, completed, is_skipped,
+                program_days(day_label),
+                workout_sets(
+                    set_number, weight_kg, reps, is_amrap,
+                    exercises(name)
+                )
+            `)
+            .eq('user_id', user!.id)
+            .gte('workout_date', formatDate(start))
+            .lte('workout_date', formatDate(end))
+            .order('workout_date', { ascending: true });
+        if (error) throw error;
+        return data || [];
+    };
+
+    const generateCSV = (logs: any[]) => {
+        const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const lines = ['Date,Séance,Exercice,Série,Poids (kg),Répétitions,AMRAP,Sauté'];
+        for (const log of logs) {
+            const date = log.workout_date;
+            const seance = log.program_days?.day_label || '';
+            if (log.is_skipped) {
+                lines.push([date, escape(seance), escape('Séance sautée'), '', '', '', '', 'Oui'].join(','));
+            } else {
+                const sorted = [...(log.workout_sets || [])].sort((a: any, b: any) => a.set_number - b.set_number);
+                if (!sorted.length) {
+                    lines.push([date, escape(seance), escape('(aucune série)'), '', '', '', '', 'Non'].join(','));
+                } else {
+                    for (const s of sorted) {
+                        lines.push([date, escape(seance), escape(s.exercises?.name || ''), s.set_number, s.weight_kg ?? '', s.reps ?? '', s.is_amrap ? 'Oui' : 'Non', 'Non'].join(','));
+                    }
+                }
+            }
+        }
+        return '﻿' + lines.join('\n');
+    };
+
+    const generateHTML = (logs: any[], start: Date, end: Date) => {
+        let rows = '';
+        for (const log of logs) {
+            const d = log.workout_date;
+            const s = (log.program_days?.day_label || '—').replace(/</g, '&lt;');
+            if (log.is_skipped) {
+                rows += `<tr style="color:#aaa;font-style:italic"><td>${d}</td><td>${s}</td><td colspan="4">😴 Séance sautée</td></tr>`;
+            } else {
+                const sorted = [...(log.workout_sets || [])].sort((a: any, b: any) => a.set_number - b.set_number);
+                if (!sorted.length) {
+                    rows += `<tr><td>${d}</td><td>${s}</td><td colspan="4" style="color:#aaa">Aucune série</td></tr>`;
+                } else {
+                    for (const set of sorted) {
+                        const ex = (set.exercises?.name || '—').replace(/</g, '&lt;');
+                        rows += `<tr><td>${d}</td><td>${s}</td><td>${ex}</td><td style="text-align:center">${set.set_number}</td><td style="text-align:center">${set.weight_kg ?? '—'} kg</td><td style="text-align:center">${set.reps ?? '—'}${set.is_amrap ? ' 🔥' : ''}</td></tr>`;
+                    }
+                }
+            }
+        }
+        return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;padding:24px;color:#1a1a2e}h1{color:#2D3182;font-size:26px;letter-spacing:3px;margin-bottom:4px}.sub{color:#888;font-size:12px;margin-bottom:20px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#2D3182;color:#fff;padding:9px 8px;text-align:left;font-size:11px}td{padding:7px 8px;border-bottom:1px solid #e8eaf0}tr:nth-child(even) td{background:#f7f8fc}</style></head><body><h1>⚡ FORCE</h1><p class="sub">Rapport de progression · Du ${start.toLocaleDateString('fr-FR')} au ${end.toLocaleDateString('fr-FR')} · Généré le ${new Date().toLocaleDateString('fr-FR')}</p><table><thead><tr><th>Date</th><th>Séance</th><th>Exercice</th><th>Série</th><th>Poids</th><th>Reps</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+    };
+
+    const handleExport = async () => {
+        if (!user || exporting) return;
+        setExporting(true);
+        try {
+            const { start, end } = getExportDateRange();
+            const logs = await fetchExportData(start, end);
+            if (!logs.length) {
+                Alert.alert('Aucune donnée', 'Aucune séance enregistrée pour cette période.');
+                return;
+            }
+            if (exportFormat === 'csv') {
+                const csv = generateCSV(logs);
+                const uri = FileSystem.documentDirectory + `force_${formatDate(new Date())}.csv`;
+                await FileSystem.writeAsStringAsync(uri, csv, { encoding: FileSystem.EncodingType.UTF8 });
+                await Sharing.shareAsync(uri, { mimeType: 'text/csv', UTI: 'public.comma-separated-values-text', dialogTitle: 'Exporter FORCE' });
+            } else {
+                const html = generateHTML(logs, start, end);
+                const { uri } = await Print.printToFileAsync({ html });
+                await Sharing.shareAsync(uri, { mimeType: 'application/pdf', UTI: 'com.adobe.pdf', dialogTitle: 'Exporter FORCE' });
+            }
+            setExportModalVisible(false);
+        } catch (err: any) {
+            Alert.alert('Erreur export', err.message);
+        } finally {
+            setExporting(false);
         }
     };
 
@@ -402,13 +537,18 @@ export default function ProgressionScreen() {
     return (
         <LinearGradient colors={[colors.background, isDark ? '#0D0D2B' : colors.cardLight]} style={styles.container}>
             <View style={styles.topNav}>
-                <View>
+                <View style={{ flex: 1, minWidth: 0, marginRight: 8 }}>
                     <Text style={styles.weekLabel}>Semaine {currentWeek}</Text>
-                    <Text style={styles.weekDates}>{datesToDisplay[0].getDate()} {datesToDisplay[0].toLocaleString('default', { month: 'short' })} — {datesToDisplay[13].getDate()} {datesToDisplay[13].toLocaleString('default', { month: 'short' })} {currentYear}</Text>
+                    <Text style={styles.weekDates} numberOfLines={1}>{datesToDisplay[0].getDate()} {datesToDisplay[0].toLocaleString('default', { month: 'short' })} — {datesToDisplay[13].getDate()} {datesToDisplay[13].toLocaleString('default', { month: 'short' })} {currentYear}</Text>
                 </View>
-                <TouchableOpacity style={styles.calendarBtn} onPress={() => setCalendarVisible(true)}>
-                    <Text style={styles.calendarIcon}>📅</Text>
-                </TouchableOpacity>
+                <View style={styles.topNavRight}>
+                    <TouchableOpacity style={styles.calendarBtn} onPress={() => setExportModalVisible(true)}>
+                        <Text style={styles.calendarIcon}>📤</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.calendarBtn} onPress={() => setCalendarVisible(true)}>
+                        <Text style={styles.calendarIcon}>📅</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
 
             <View style={styles.dateStrip}>
@@ -438,6 +578,7 @@ export default function ProgressionScreen() {
                 ) : (
                     <View style={styles.restBadge}><Text style={styles.restBadgeText}> JOUR DE REPOS 😴</Text></View>
                 )}
+                {savedRecently && <Text style={styles.savedIndicator}>✓ Enregistré automatiquement</Text>}
             </View>
 
             {loading ? (
@@ -457,7 +598,10 @@ export default function ProgressionScreen() {
                         </View>
                         <Switch
                             value={isSkipped}
-                            onValueChange={setIsSkipped}
+                            onValueChange={(value) => {
+                                setIsSkipped(value);
+                                handleSave(value);
+                            }}
                             trackColor={{ false: colors.border, true: colors.error + '40' }}
                             thumbColor={isSkipped ? colors.error : '#f4f3f4'}
                         />
@@ -468,11 +612,6 @@ export default function ProgressionScreen() {
                             <Text style={styles.emptyEmoji}>😴</Text>
                             <Text style={styles.emptyTitle}>Séance sautée</Text>
                             <Text style={styles.emptyText}>Tu as indiqué ne pas avoir fait cette séance. La progression est mise en pause.</Text>
-                            <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
-                                <LinearGradient colors={[colors.error, '#FF3B30']} style={styles.saveGradient}>
-                                    {saving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={styles.saveText}>💾 Valider l'absence</Text>}
-                                </LinearGradient>
-                            </TouchableOpacity>
                         </View>
                     ) : (
                         <ScrollView style={styles.exerciseList} contentContainerStyle={styles.exerciseListContent} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.primary} />}>
@@ -502,6 +641,7 @@ export default function ProgressionScreen() {
                                                         value={set.weight}
                                                         onChangeText={(v) => updateSet(exercise.id, si, 'weight', v)}
                                                         onFocus={() => { if (set.weight === '0') updateSet(exercise.id, si, 'weight', ''); }}
+                                                        onBlur={triggerAutoSave}
                                                         selectTextOnFocus
                                                         keyboardType="numeric"
                                                         placeholderTextColor={colors.textMuted}
@@ -514,6 +654,7 @@ export default function ProgressionScreen() {
                                                         value={set.reps}
                                                         onChangeText={(v) => updateSet(exercise.id, si, 'reps', v)}
                                                         onFocus={() => { if (set.reps === '0' || set.reps === '00') updateSet(exercise.id, si, 'reps', ''); }}
+                                                        onBlur={triggerAutoSave}
                                                         selectTextOnFocus
                                                         keyboardType="numeric"
                                                         placeholder={exercise.target_reps.toString()}
@@ -530,15 +671,90 @@ export default function ProgressionScreen() {
                                     </View>
                                 );
                             })}
-                            <TouchableOpacity style={styles.saveButton} onPress={handleSave} disabled={saving}>
-                                <LinearGradient colors={['#2DD46B', '#1FB155']} style={styles.saveGradient}>
-                                    {saving ? <ActivityIndicator color="#FFF" /> : <Text style={styles.saveText}>✅ Valider la séance</Text>}
-                                </LinearGradient>
-                            </TouchableOpacity>
                         </ScrollView>
                     )}
                 </View>
             )}
+
+            {/* ── Export Modal ───────────────────────────────────── */}
+            <Modal visible={exportModalVisible} transparent animationType="slide">
+                <View style={styles.modalOverlay}>
+                    <View style={styles.modalContent}>
+                        <View style={styles.modalHeader}>
+                            <Text style={styles.modalTitle}>📤 Exporter les données</Text>
+                            <TouchableOpacity onPress={() => setExportModalVisible(false)}>
+                                <Text style={styles.closeModal}>Fermer</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <Text style={styles.exportSectionLabel}>PÉRIODE</Text>
+                        <View style={styles.exportTypeTabs}>
+                            <TouchableOpacity
+                                style={[styles.exportTypeTab, exportPeriodType === 'weeks' && styles.exportTypeTabActive]}
+                                onPress={() => { setExportPeriodType('weeks'); setExportAmount(4); }}
+                            >
+                                <Text style={[styles.exportTypeTabText, exportPeriodType === 'weeks' && styles.exportTypeTabTextActive]}>Semaines</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.exportTypeTab, exportPeriodType === 'months' && styles.exportTypeTabActive]}
+                                onPress={() => { setExportPeriodType('months'); setExportAmount(1); }}
+                            >
+                                <Text style={[styles.exportTypeTabText, exportPeriodType === 'months' && styles.exportTypeTabTextActive]}>Mois</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <View style={styles.exportAmountRow}>
+                            {(exportPeriodType === 'weeks'
+                                ? [1, 2, 3, 4, 6, 8, 12, 16, 20]
+                                : [1, 2, 3, 4, 5]
+                            ).map(n => (
+                                <TouchableOpacity
+                                    key={n}
+                                    style={[styles.exportAmountChip, exportAmount === n && styles.exportAmountChipActive]}
+                                    onPress={() => setExportAmount(n)}
+                                >
+                                    <Text style={[styles.exportAmountText, exportAmount === n && styles.exportAmountTextActive]}>
+                                        {n}
+                                    </Text>
+                                </TouchableOpacity>
+                            ))}
+                        </View>
+                        <Text style={styles.exportPeriodHint}>
+                            {exportPeriodType === 'weeks'
+                                ? `${exportAmount} dernière${exportAmount > 1 ? 's' : ''} semaine${exportAmount > 1 ? 's' : ''}`
+                                : `${exportAmount} dernier${exportAmount > 1 ? 's' : ''} mois`}
+                        </Text>
+
+                        <Text style={styles.exportSectionLabel}>FORMAT</Text>
+                        <View style={styles.exportFormatRow}>
+                            <TouchableOpacity
+                                style={[styles.exportFormatBtn, exportFormat === 'csv' && styles.exportFormatBtnActive]}
+                                onPress={() => setExportFormat('csv')}
+                            >
+                                <Text style={styles.exportFormatIcon}>📊</Text>
+                                <Text style={[styles.exportFormatText, exportFormat === 'csv' && styles.exportFormatTextActive]}>CSV</Text>
+                                <Text style={styles.exportFormatSub}>Excel / Google Sheets</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                style={[styles.exportFormatBtn, exportFormat === 'pdf' && styles.exportFormatBtnActive]}
+                                onPress={() => setExportFormat('pdf')}
+                            >
+                                <Text style={styles.exportFormatIcon}>📄</Text>
+                                <Text style={[styles.exportFormatText, exportFormat === 'pdf' && styles.exportFormatTextActive]}>PDF</Text>
+                                <Text style={styles.exportFormatSub}>Impression / Partage</Text>
+                            </TouchableOpacity>
+                        </View>
+
+                        <TouchableOpacity style={styles.exportBtn} onPress={handleExport} disabled={exporting}>
+                            <LinearGradient colors={['#2D3182', '#1a1f6b']} style={styles.exportBtnGradient}>
+                                {exporting
+                                    ? <ActivityIndicator color="#fff" />
+                                    : <Text style={styles.exportBtnText}>Exporter</Text>}
+                            </LinearGradient>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
 
             <Modal visible={calendarVisible} transparent animationType="slide">
                 <View style={styles.modalOverlay}>
@@ -567,6 +783,30 @@ export default function ProgressionScreen() {
 const createStyles = (colors: any) => StyleSheet.create({
     container: { flex: 1, paddingTop: 60 },
     topNav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, marginBottom: SPACING.md },
+    topNavRight: { flexDirection: 'row', gap: 8 },
+
+    exportSectionLabel: { fontSize: 11, fontWeight: '800', color: colors.textMuted, letterSpacing: 1, marginTop: 20, marginBottom: 10 },
+    exportTypeTabs: { flexDirection: 'row', gap: 10, marginBottom: 14 },
+    exportTypeTab: { flex: 1, paddingVertical: 10, borderRadius: 10, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center' },
+    exportTypeTabActive: { borderColor: colors.primary, backgroundColor: colors.primary + '15' },
+    exportTypeTabText: { fontWeight: '700', color: colors.textSecondary, fontSize: 14 },
+    exportTypeTabTextActive: { color: colors.primary },
+    exportAmountRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+    exportAmountChip: { width: 44, height: 44, borderRadius: 22, borderWidth: 1.5, borderColor: colors.border, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.card },
+    exportAmountChipActive: { borderColor: colors.primary, backgroundColor: colors.primary },
+    exportAmountText: { fontSize: 14, fontWeight: '800', color: colors.textSecondary },
+    exportAmountTextActive: { color: '#fff' },
+    exportPeriodHint: { fontSize: 12, color: colors.textMuted, marginBottom: 4 },
+    exportFormatRow: { flexDirection: 'row', gap: 12, marginBottom: 24 },
+    exportFormatBtn: { flex: 1, padding: 14, borderRadius: 14, borderWidth: 1.5, borderColor: colors.border, alignItems: 'center', backgroundColor: colors.card },
+    exportFormatBtnActive: { borderColor: colors.primary, backgroundColor: colors.primary + '12' },
+    exportFormatIcon: { fontSize: 28, marginBottom: 4 },
+    exportFormatText: { fontSize: 16, fontWeight: '800', color: colors.textSecondary },
+    exportFormatTextActive: { color: colors.primary },
+    exportFormatSub: { fontSize: 10, color: colors.textMuted, marginTop: 2, textAlign: 'center' },
+    exportBtn: { borderRadius: 14, overflow: 'hidden' },
+    exportBtnGradient: { paddingVertical: 16, alignItems: 'center' },
+    exportBtnText: { color: '#fff', fontSize: 17, fontWeight: '800', letterSpacing: 0.5 },
     weekLabel: { fontSize: 22, fontWeight: '900', color: colors.text },
     weekDates: { fontSize: 13, color: colors.textSecondary, fontWeight: '600' },
     calendarBtn: { backgroundColor: colors.card, padding: 10, borderRadius: 12, borderWidth: 1, borderColor: colors.border },
@@ -584,6 +824,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     trainingIndicatorActive: { backgroundColor: colors.text },
 
     sessionOverview: { paddingHorizontal: SPACING.md, marginBottom: SPACING.md },
+    savedIndicator: { textAlign: 'center', color: '#2DD46B', fontSize: 12, fontWeight: '700', marginTop: 6 },
     sessionBadge: { borderRadius: BORDER_RADIUS.sm, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center' },
     sessionBadgeText: { color: '#FFF', fontSize: 14, fontWeight: '900', letterSpacing: 0.5 },
     restBadge: { backgroundColor: colors.card, borderRadius: BORDER_RADIUS.sm, paddingVertical: 12, paddingHorizontal: 16, alignItems: 'center', borderWidth: 1, borderColor: colors.border },
@@ -609,9 +850,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     pasteIcon: { position: 'absolute', right: 5, top: '50%', marginTop: -12, backgroundColor: colors.card, padding: 2, borderRadius: 4, elevation: 2, shadowColor: '#000', shadowOpacity: 0.1, shadowRadius: 2 },
     pasteIconText: { fontSize: 12 },
 
-    saveButton: { borderRadius: BORDER_RADIUS.sm, overflow: 'hidden', marginTop: SPACING.md, marginBottom: SPACING.xl },
-    saveGradient: { paddingVertical: 16, alignItems: 'center' },
-    saveText: { color: '#FFF', fontSize: 17, fontWeight: '800' },
+
 
     skipCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.card, marginHorizontal: SPACING.md, marginBottom: SPACING.md, padding: 16, borderRadius: BORDER_RADIUS.md, borderWidth: 1, borderColor: colors.border },
     skipInfo: { flex: 1 },

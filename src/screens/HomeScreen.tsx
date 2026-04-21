@@ -5,7 +5,6 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useNavigation } from '@react-navigation/native';
-import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
@@ -36,7 +35,7 @@ export default function HomeScreen() {
     ];
 
     const fetchStats = useCallback(async () => {
-        if (!user || !profile) return;
+        if (!user) return;
 
         // Calculate streak
         const { data: streakData } = await supabase.rpc('calculate_streak', { p_user_id: user.id });
@@ -79,13 +78,9 @@ export default function HomeScreen() {
         }
 
         await refreshProfile();
-    }, [user, profile, refreshProfile]);
+    }, [user, refreshProfile]);
 
-    useFocusEffect(
-        useCallback(() => {
-            fetchStats();
-        }, [fetchStats])
-    );
+    useEffect(() => { fetchStats(); }, [fetchStats]);
 
     const onRefresh = async () => {
         setRefreshing(true);
@@ -122,7 +117,7 @@ export default function HomeScreen() {
                 {/* Header: Salut [Pseudo] + PP small on right */}
                 <View style={styles.header}>
                     <View style={styles.headerTextContainer}>
-                        <Text style={styles.greeting}>Salut {profile?.username || 'Guerrier'} 👋</Text>
+                        <Text style={styles.greeting} numberOfLines={1}>Salut {profile?.username || 'Guerrier'} 👋</Text>
                         <Text style={styles.headerSub}>Ta force n'attend que toi.</Text>
                     </View>
                     <TouchableOpacity style={styles.avatarMiniContainer}>
@@ -309,7 +304,7 @@ const createStyles = (colors: any) => StyleSheet.create({
         marginBottom: SPACING.xl,
     },
     headerTextContainer: { flex: 1 },
-    greeting: { fontSize: 28, fontWeight: '800', color: colors.text },
+    greeting: { fontSize: 28, fontWeight: '800', color: colors.text, flexShrink: 1 },
     headerSub: { fontSize: 16, color: colors.textSecondary, marginTop: 4 },
     avatarMiniContainer: {
         width: 50,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
     View, Text, TextInput, TouchableOpacity, StyleSheet,
     ScrollView, ActivityIndicator, Image, Modal,
@@ -32,17 +32,6 @@ export default function SettingsScreen() {
         return `${d}/${m}/${y}`;
     });
     const [modal, setModal] = useState<ModalConfig | null>(null);
-
-    // Sync local state when profile arrives or changes (fixes stale initial state)
-    useEffect(() => {
-        if (profile?.current_weight_kg != null) {
-            setWeight(profile.current_weight_kg.toString());
-        }
-        if (profile?.birth_date) {
-            const [y, m, d] = profile.birth_date.split('-');
-            setBirthDate(`${d}/${m}/${y}`);
-        }
-    }, [profile]);
 
     const showAlert = (title: string, message: string) => setModal({ title, message });
     const showConfirm = (
@@ -528,8 +517,8 @@ const createStyles = (colors: any) => StyleSheet.create({
         paddingVertical: SPACING.sm, borderBottomWidth: 1,
         borderBottomColor: colors.border + '40',
     },
-    infoLabel: { color: colors.textSecondary, fontSize: 13 },
-    infoValue: { color: colors.text, fontSize: 15, fontWeight: '600' },
+    infoLabel: { color: colors.textSecondary, fontSize: 13, flexShrink: 0 },
+    infoValue: { color: colors.text, fontSize: 15, fontWeight: '600', flexShrink: 1, textAlign: 'right', marginLeft: SPACING.sm },
     weightRow: { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm },
     weightInput: {
         flex: 1, backgroundColor: colors.backgroundLight,

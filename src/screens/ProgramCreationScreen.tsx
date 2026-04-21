@@ -642,7 +642,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     deleteExText: { color: colors.error, fontSize: 16 },
     restToggleContainer: { alignItems: 'center' },
     restToggleLabel: { fontSize: 9, color: colors.textSecondary, fontWeight: '700', textTransform: 'uppercase', marginBottom: 2 },
-    exerciseRow: { flexDirection: 'row', gap: SPACING.md },
+    exerciseRow: { flexDirection: 'row', gap: SPACING.sm, flexWrap: 'wrap' },
     miniField: { flex: 1 },
     miniLabel: { color: colors.textMuted, fontSize: 9, marginBottom: 2 },
     miniInput: { backgroundColor: colors.card, borderRadius: 4, padding: 4, color: colors.text, fontSize: 12, textAlign: 'center', borderWidth: 1, borderColor: colors.border },

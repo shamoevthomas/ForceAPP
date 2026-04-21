@@ -5,6 +5,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useFocusEffect } from '@react-navigation/native';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
 import { useAuth } from '../contexts/AuthContext';
 import { useTheme } from '../contexts/ThemeContext';
 import { supabase } from '../lib/supabase';
@@ -30,6 +32,7 @@ export default function ProgramScreen() {
     const [loading, setLoading] = useState(true);
     const [creating, setCreating] = useState(false);
     const [refreshing, setRefreshing] = useState(false);
+    const [exportingPdf, setExportingPdf] = useState(false);
 
     // Get today's weekday (1=Mon, 7=Sun)
     const today = (new Date().getDay() + 6) % 7 + 1;
@@ -109,6 +112,98 @@ export default function ProgramScreen() {
         );
     };
 
+    const handleExportPDF = async () => {
+        if (!program || exportingPdf) return;
+        setExportingPdf(true);
+        try {
+            const dayBlocks = WEEKDAYS.map(day => {
+                const dayData = program.program_days.find(d => d.day_number === day.id);
+                if (!dayData || dayData.is_rest_day) {
+                    return `
+                        <div class="day-block rest">
+                            <div class="day-header">
+                                <span class="day-name">${day.full.toUpperCase()}</span>
+                                <span class="day-tag rest-tag">REPOS 🌊</span>
+                            </div>
+                        </div>`;
+                }
+                const exRows = dayData.exercises.map((ex: Exercise, i: number) => `
+                    <tr>
+                        <td class="num">${i + 1}</td>
+                        <td class="ex-name">${ex.name.replace(/</g, '&lt;')}</td>
+                        <td class="center">${ex.target_sets}</td>
+                        <td class="center">${ex.target_reps}</td>
+                        <td class="center">${ex.current_weight_kg} kg</td>
+                    </tr>`).join('');
+                return `
+                    <div class="day-block">
+                        <div class="day-header">
+                            <span class="day-name">${day.full.toUpperCase()}</span>
+                            ${dayData.day_label ? `<span class="day-tag">${dayData.day_label.replace(/</g, '&lt;')}</span>` : ''}
+                        </div>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th class="num">#</th>
+                                    <th>Exercice</th>
+                                    <th class="center">Séries</th>
+                                    <th class="center">Reps</th>
+                                    <th class="center">Poids actuel</th>
+                                </tr>
+                            </thead>
+                            <tbody>${exRows}</tbody>
+                        </table>
+                    </div>`;
+            }).join('');
+
+            const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Arial, sans-serif; background: #fff; color: #1a1a2e; padding: 32px; }
+  .header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
+  .logo { font-size: 36px; }
+  .brand { font-size: 32px; font-weight: 900; color: #2D3182; letter-spacing: 4px; }
+  .meta { font-size: 12px; color: #888; margin-bottom: 28px; }
+  .day-block { margin-bottom: 22px; border-radius: 10px; overflow: hidden; border: 1px solid #e0e4f0; }
+  .day-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #2D3182; }
+  .day-block.rest .day-header { background: #6b7280; }
+  .day-name { font-size: 13px; font-weight: 800; color: #fff; letter-spacing: 1px; }
+  .day-tag { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.75); }
+  .rest-tag { font-style: italic; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  thead tr { background: #f0f2fa; }
+  th { padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 800; color: #6070a0; letter-spacing: 0.5px; text-transform: uppercase; }
+  td { padding: 9px 10px; border-bottom: 1px solid #f0f2fa; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #fafbff; }
+  .num { width: 32px; color: #9090b0; font-weight: 700; }
+  .ex-name { font-weight: 700; color: #1a1a2e; }
+  .center { text-align: center; font-weight: 700; color: #2D3182; }
+</style>
+</head>
+<body>
+<div class="header"><span class="logo">⚡</span><span class="brand">FORCE</span></div>
+<p class="meta">Programme · ${program.name || 'Mon programme'} · Exporté le ${new Date().toLocaleDateString('fr-FR')}</p>
+${dayBlocks}
+</body>
+</html>`;
+
+            const { uri } = await Print.printToFileAsync({ html });
+            await Sharing.shareAsync(uri, {
+                mimeType: 'application/pdf',
+                UTI: 'com.adobe.pdf',
+                dialogTitle: 'Exporter le programme FORCE',
+            });
+        } catch (err: any) {
+            Alert.alert('Erreur', err.message);
+        } finally {
+            setExportingPdf(false);
+        }
+    };
+
     if (creating) {
         return (
             <ProgramCreationScreen
@@ -144,9 +239,16 @@ export default function ProgramScreen() {
                 <View>
                     <Text style={styles.title}>Programme</Text>
                 </View>
-                <TouchableOpacity style={styles.editBtn} onPress={() => setCreating(true)}>
-                    <Text style={styles.editBtnText}>Modifier</Text>
-                </TouchableOpacity>
+                <View style={styles.headerActions}>
+                    <TouchableOpacity style={styles.exportBtn} onPress={handleExportPDF} disabled={exportingPdf}>
+                        {exportingPdf
+                            ? <ActivityIndicator size="small" color={colors.primary} />
+                            : <Text style={styles.exportBtnText}>📤 PDF</Text>}
+                    </TouchableOpacity>
+                    <TouchableOpacity style={styles.editBtn} onPress={() => setCreating(true)}>
+                        <Text style={styles.editBtnText}>Modifier</Text>
+                    </TouchableOpacity>
+                </View>
             </View>
 
             {/* Weekday Selector */}
@@ -243,6 +345,18 @@ const createStyles = (colors: any) => StyleSheet.create({
     },
     title: { fontSize: 24, fontWeight: '800', color: colors.text },
     subtitle: { fontSize: 13, color: colors.textSecondary, marginTop: 2 },
+    headerActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    exportBtn: {
+        paddingHorizontal: 12,
+        paddingVertical: 6,
+        backgroundColor: colors.card,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: colors.border,
+        minWidth: 72,
+        alignItems: 'center',
+    },
+    exportBtnText: { color: colors.primary, fontSize: 12, fontWeight: '700' },
     editBtn: {
         paddingHorizontal: 12,
         paddingVertical: 6,

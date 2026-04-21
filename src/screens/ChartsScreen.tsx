@@ -432,7 +432,7 @@ const createStyles = (colors: any) => StyleSheet.create({
     },
     filterRow: {
         flexDirection: 'row', gap: SPACING.sm, marginBottom: SPACING.lg,
-        justifyContent: 'center',
+        justifyContent: 'center', flexWrap: 'wrap',
     },
     filterChip: {
         paddingHorizontal: SPACING.md, paddingVertical: SPACING.xs,

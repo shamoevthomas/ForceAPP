@@ -52,24 +52,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
 
     useEffect(() => {
-        // Use only onAuthStateChange — it fires INITIAL_SESSION first (Supabase v2+),
-        // eliminating the race condition between getSession() and onAuthStateChange().
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
+        const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
             setSession(session);
             setUser(session?.user ?? null);
             if (session?.user) {
-                // Await fetchProfile so profile is ready BEFORE loading becomes false
-                await fetchProfile(session.user.id);
-                Notifications.registerForPushNotificationsAsync().catch(console.error);
+                fetchProfile(session.user.id);
             } else {
                 setProfile(null);
                 setNeedsOnboarding(false);
             }
-            // Only set loading false AFTER profile is fetched
-            if (loading) setLoading(false);
+            if (event === 'INITIAL_SESSION') {
+                setLoading(false);
+                if (session?.user) {
+                    Notifications.registerForPushNotificationsAsync().catch(console.error);
+                }
+            }
         });
 
-        return () => subscription.unsubscribe();
+        // Safety net: never stay stuck on loading screen
+        const timeout = setTimeout(() => setLoading(false), 10000);
+
+        return () => {
+            subscription.unsubscribe();
+            clearTimeout(timeout);
+        };
     }, []);
 
     const signUp = async (email: string, password: string) => {

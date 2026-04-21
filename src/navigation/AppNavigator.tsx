@@ -100,35 +100,32 @@ function OnboardingStack() {
     const styles = createStyles(colors);
     const [hasProgram, setHasProgram] = React.useState(false);
     const [checkingProgram, setCheckingProgram] = React.useState(true);
-    const { user, profile, needsOnboarding } = useAuth();
+    const { user, needsOnboarding } = useAuth();
 
     React.useEffect(() => {
         checkProgram();
-    }, [needsOnboarding, user, profile]);
+    }, [needsOnboarding]);
 
     const checkProgram = async () => {
-        // Don't check until profile has been loaded (profile is null before fetch completes)
-        if (!user || !profile) {
-            // If needsOnboarding is true, profile is null because the user row doesn't exist yet
-            if (needsOnboarding) {
-                setCheckingProgram(false);
-            }
-            return;
-        }
-        if (needsOnboarding) {
+        if (!user || needsOnboarding) {
             setCheckingProgram(false);
             return;
         }
-        const { supabase } = require('../lib/supabase');
-        const { data } = await supabase
-            .from('programs')
-            .select('id')
-            .eq('user_id', user.id)
-            .eq('is_active', true)
-            .limit(1);
+        try {
+            const { supabase } = require('../lib/supabase');
+            const { data } = await supabase
+                .from('programs')
+                .select('id')
+                .eq('user_id', user.id)
+                .eq('is_active', true)
+                .limit(1);
 
-        setHasProgram(data && data.length > 0);
-        setCheckingProgram(false);
+            setHasProgram(data && data.length > 0);
+        } catch (e) {
+            console.error('checkProgram error:', e);
+        } finally {
+            setCheckingProgram(false);
+        }
     };
 
     if (checkingProgram) {
