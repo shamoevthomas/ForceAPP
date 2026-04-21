@@ -1,7 +1,7 @@
 export type ExperienceLevel = 'beginner' | 'novice' | 'experienced';
 export type Gender = 'male' | 'female';
 
-export type WeightIncrement = '1.25' | '2.5' | '3.75' | '5' | '6.25' | '7.5' | '8.75' | '10';
+export type WeightIncrement = '1.25' | '2' | '2.5' | '3.75' | '5' | '6.25' | '7.5' | '8.75' | '10';
 
 export interface UserProfile {
     id: string;

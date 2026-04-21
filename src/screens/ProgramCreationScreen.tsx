@@ -24,7 +24,7 @@ const WEEKDAYS = [
     { id: 7, label: 'Dimanche' },
 ];
 
-const INCREMENTS: WeightIncrement[] = ['1.25', '2.5', '3.75', '5', '6.25', '7.5', '8.75', '10'];
+const INCREMENTS: WeightIncrement[] = ['1.25', '2', '2.5', '3.75', '5', '6.25', '7.5', '8.75', '10'];
 
 
 interface ExerciseInput {
