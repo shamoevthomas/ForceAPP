@@ -431,40 +431,57 @@ export default function ProgressionScreen() {
     };
 
     const fetchExportData = async (start: Date, end: Date) => {
-        const { data, error } = await supabase
+        // Step 1: fetch logs + sets (no nested exercise join — use exercise_id)
+        const { data: logs, error } = await supabase
             .from('workout_logs')
-            .select(`
-                workout_date, completed, is_skipped,
-                program_days(day_label),
-                workout_sets(
-                    set_number, weight_kg, reps, is_amrap,
-                    exercises(name)
-                )
-            `)
+            .select('id, workout_date, is_skipped, program_day_id, workout_sets(set_number, weight_kg, reps, is_amrap, exercise_id)')
             .eq('user_id', user!.id)
             .gte('workout_date', formatDate(start))
             .lte('workout_date', formatDate(end))
             .order('workout_date', { ascending: true });
         if (error) throw error;
-        return data || [];
+        if (!logs?.length) return [];
+
+        // Step 2: fetch program days + exercises to resolve names
+        const dayIds = [...new Set(logs.map((l: any) => l.program_day_id).filter(Boolean))];
+        const { data: pDays } = await supabase
+            .from('program_days')
+            .select('id, day_label, exercises(id, name)')
+            .in('id', dayIds);
+
+        const dayLabelMap = new Map<string, string>((pDays ?? []).map((d: any) => [d.id, d.day_label || '']));
+        const exNameMap = new Map<string, string>();
+        (pDays ?? []).forEach((d: any) => (d.exercises ?? []).forEach((e: any) => exNameMap.set(e.id, e.name)));
+
+        return logs.map((log: any) => ({
+            workout_date: log.workout_date,
+            is_skipped: log.is_skipped,
+            day_label: dayLabelMap.get(log.program_day_id) || '',
+            sets: (log.workout_sets ?? [])
+                .sort((a: any, b: any) => a.set_number - b.set_number)
+                .map((s: any) => ({
+                    exercise_name: exNameMap.get(s.exercise_id) || '—',
+                    set_number: s.set_number,
+                    weight_kg: s.weight_kg,
+                    reps: s.reps,
+                    is_amrap: s.is_amrap,
+                })),
+        }));
     };
 
     const generateCSV = (logs: any[]) => {
-        const escape = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+        const esc = (v: any) => `"${String(v ?? '').replace(/"/g, '""')}"`;
         const lines = ['Date,Séance,Exercice,Série,Poids (kg),Répétitions,AMRAP,Sauté'];
         for (const log of logs) {
-            const date = log.workout_date;
-            const seance = log.program_days?.day_label || '';
+            const d = log.workout_date;
+            const s = esc(log.day_label);
             if (log.is_skipped) {
-                lines.push([date, escape(seance), escape('Séance sautée'), '', '', '', '', 'Oui'].join(','));
+                lines.push([d, s, esc('Séance sautée'), '', '', '', '', 'Oui'].join(','));
+            } else if (!log.sets.length) {
+                lines.push([d, s, esc('(aucune série)'), '', '', '', '', 'Non'].join(','));
             } else {
-                const sorted = [...(log.workout_sets || [])].sort((a: any, b: any) => a.set_number - b.set_number);
-                if (!sorted.length) {
-                    lines.push([date, escape(seance), escape('(aucune série)'), '', '', '', '', 'Non'].join(','));
-                } else {
-                    for (const s of sorted) {
-                        lines.push([date, escape(seance), escape(s.exercises?.name || ''), s.set_number, s.weight_kg ?? '', s.reps ?? '', s.is_amrap ? 'Oui' : 'Non', 'Non'].join(','));
-                    }
+                for (const set of log.sets) {
+                    lines.push([d, s, esc(set.exercise_name), set.set_number, set.weight_kg ?? '', set.reps ?? '', set.is_amrap ? 'Oui' : 'Non', 'Non'].join(','));
                 }
             }
         }
@@ -475,22 +492,46 @@ export default function ProgressionScreen() {
         let rows = '';
         for (const log of logs) {
             const d = log.workout_date;
-            const s = (log.program_days?.day_label || '—').replace(/</g, '&lt;');
+            const s = (log.day_label || '—').replace(/</g, '&lt;');
             if (log.is_skipped) {
-                rows += `<tr style="color:#aaa;font-style:italic"><td>${d}</td><td>${s}</td><td colspan="4">😴 Séance sautée</td></tr>`;
+                rows += `<tr class="skipped"><td>${d}</td><td>${s}</td><td colspan="4">😴 Séance sautée</td></tr>`;
+            } else if (!log.sets.length) {
+                rows += `<tr><td>${d}</td><td>${s}</td><td colspan="4" style="color:#aaa">Aucune série enregistrée</td></tr>`;
             } else {
-                const sorted = [...(log.workout_sets || [])].sort((a: any, b: any) => a.set_number - b.set_number);
-                if (!sorted.length) {
-                    rows += `<tr><td>${d}</td><td>${s}</td><td colspan="4" style="color:#aaa">Aucune série</td></tr>`;
-                } else {
-                    for (const set of sorted) {
-                        const ex = (set.exercises?.name || '—').replace(/</g, '&lt;');
-                        rows += `<tr><td>${d}</td><td>${s}</td><td>${ex}</td><td style="text-align:center">${set.set_number}</td><td style="text-align:center">${set.weight_kg ?? '—'} kg</td><td style="text-align:center">${set.reps ?? '—'}${set.is_amrap ? ' 🔥' : ''}</td></tr>`;
-                    }
-                }
+                log.sets.forEach((set: any, i: number) => {
+                    const ex = set.exercise_name.replace(/</g, '&lt;');
+                    rows += `<tr${i % 2 === 1 ? ' class="alt"' : ''}><td>${i === 0 ? d : ''}</td><td>${i === 0 ? s : ''}</td><td>${ex}</td><td>${set.set_number}</td><td>${set.weight_kg ?? '—'} kg</td><td>${set.reps ?? '—'}${set.is_amrap ? ' 🔥' : ''}</td></tr>`;
+                });
             }
         }
-        return `<!DOCTYPE html><html><head><meta charset="UTF-8"><style>body{font-family:Arial,sans-serif;padding:24px;color:#1a1a2e}h1{color:#2D3182;font-size:26px;letter-spacing:3px;margin-bottom:4px}.sub{color:#888;font-size:12px;margin-bottom:20px}table{width:100%;border-collapse:collapse;font-size:12px}th{background:#2D3182;color:#fff;padding:9px 8px;text-align:left;font-size:11px}td{padding:7px 8px;border-bottom:1px solid #e8eaf0}tr:nth-child(even) td{background:#f7f8fc}</style></head><body><h1>⚡ FORCE</h1><p class="sub">Rapport de progression · Du ${start.toLocaleDateString('fr-FR')} au ${end.toLocaleDateString('fr-FR')} · Généré le ${new Date().toLocaleDateString('fr-FR')}</p><table><thead><tr><th>Date</th><th>Séance</th><th>Exercice</th><th>Série</th><th>Poids</th><th>Reps</th></tr></thead><tbody>${rows}</tbody></table></body></html>`;
+        return `<!DOCTYPE html><html lang="fr"><head><meta charset="UTF-8">
+<style>
+@page{size:A4;margin:18mm}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:Arial,sans-serif;color:#1a1a2e;font-size:10pt}
+.hd{display:flex;align-items:center;justify-content:space-between;padding-bottom:14px;border-bottom:3px solid #2D3182;margin-bottom:20px}
+.brand{font-size:24pt;font-weight:900;color:#2D3182;letter-spacing:5px}
+.logo{font-size:24pt;margin-right:8px}
+.sub{font-size:9pt;color:#888;text-align:right}
+h2{font-size:11pt;color:#2D3182;margin-bottom:10px}
+table{width:100%;border-collapse:collapse;font-size:9pt}
+th{background:#2D3182;color:#fff;padding:7px 8px;text-align:left;font-size:8pt;text-transform:uppercase;letter-spacing:.4px}
+td{padding:6px 8px;border-bottom:1px solid #eef0f8}
+tr.alt td{background:#f8f9ff}
+tr.skipped td{color:#aaa;font-style:italic}
+.ft{margin-top:20px;padding-top:10px;border-top:1px solid #eef0f8;font-size:8pt;color:#aaa;display:flex;justify-content:space-between}
+</style>
+</head><body>
+<div class="hd">
+  <div><span class="logo">⚡</span><span class="brand">FORCE</span></div>
+  <div class="sub">Rapport de progression<br>Du ${start.toLocaleDateString('fr-FR')} au ${end.toLocaleDateString('fr-FR')}<br>Généré le ${new Date().toLocaleDateString('fr-FR')}</div>
+</div>
+<table>
+<thead><tr><th>Date</th><th>Séance</th><th>Exercice</th><th>Série</th><th>Poids</th><th>Reps</th></tr></thead>
+<tbody>${rows}</tbody>
+</table>
+<div class="ft"><span>⚡ FORCE — Rapport de progression</span><span>${new Date().toLocaleDateString('fr-FR')}</span></div>
+</body></html>`;
     };
 
     const handleExport = async () => {

@@ -116,89 +116,127 @@ export default function ProgramScreen() {
         if (!program || exportingPdf) return;
         setExportingPdf(true);
         try {
+            const activeDays = WEEKDAYS.filter(day => {
+                const d = program.program_days.find(pd => pd.day_number === day.id);
+                return d && !d.is_rest_day;
+            });
+            const restDays = WEEKDAYS.filter(day => {
+                const d = program.program_days.find(pd => pd.day_number === day.id);
+                return !d || d.is_rest_day;
+            });
+
             const dayBlocks = WEEKDAYS.map(day => {
                 const dayData = program.program_days.find(d => d.day_number === day.id);
                 if (!dayData || dayData.is_rest_day) {
-                    return `
-                        <div class="day-block rest">
-                            <div class="day-header">
-                                <span class="day-name">${day.full.toUpperCase()}</span>
-                                <span class="day-tag rest-tag">REPOS 🌊</span>
-                            </div>
-                        </div>`;
+                    return `<div class="day-block rest"><div class="day-header"><span class="day-name">${day.full}</span><span class="day-rest-tag">Repos</span></div></div>`;
                 }
                 const exRows = dayData.exercises.map((ex: Exercise, i: number) => `
-                    <tr>
-                        <td class="num">${i + 1}</td>
-                        <td class="ex-name">${ex.name.replace(/</g, '&lt;')}</td>
-                        <td class="center">${ex.target_sets}</td>
-                        <td class="center">${ex.target_reps}</td>
-                        <td class="center">${ex.current_weight_kg} kg</td>
-                    </tr>`).join('');
+                <tr class="${i % 2 === 1 ? 'alt' : ''}">
+                  <td class="td-num">${i + 1}</td>
+                  <td class="td-name">${ex.name.replace(/</g, '&lt;')}</td>
+                  <td class="td-center">${ex.target_sets}</td>
+                  <td class="td-center">${ex.target_reps}</td>
+                  <td class="td-center">${ex.current_weight_kg} kg</td>
+                  <td class="td-inc">+${ex.weight_increment} kg</td>
+                </tr>`).join('');
                 return `
-                    <div class="day-block">
-                        <div class="day-header">
-                            <span class="day-name">${day.full.toUpperCase()}</span>
-                            ${dayData.day_label ? `<span class="day-tag">${dayData.day_label.replace(/</g, '&lt;')}</span>` : ''}
-                        </div>
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th class="num">#</th>
-                                    <th>Exercice</th>
-                                    <th class="center">Séries</th>
-                                    <th class="center">Reps</th>
-                                    <th class="center">Poids actuel</th>
-                                </tr>
-                            </thead>
-                            <tbody>${exRows}</tbody>
-                        </table>
-                    </div>`;
+                <div class="day-block">
+                  <div class="day-header">
+                    <span class="day-name">${day.full}</span>
+                    ${dayData.day_label ? `<span class="day-label-tag">${dayData.day_label.replace(/</g, '&lt;')}</span>` : ''}
+                    <span class="day-count">${dayData.exercises.length} exercice${dayData.exercises.length > 1 ? 's' : ''}</span>
+                  </div>
+                  <table>
+                    <thead><tr><th class="th-num">#</th><th>Exercice</th><th class="th-center">Séries</th><th class="th-center">Reps</th><th class="th-center">Poids actuel</th><th class="th-center">Surcharge</th></tr></thead>
+                    <tbody>${exRows}</tbody>
+                  </table>
+                </div>`;
             }).join('');
 
+            const totalExercises = activeDays.reduce((acc, day) => {
+                const d = program.program_days.find(pd => pd.day_number === day.id);
+                return acc + (d?.exercises.length || 0);
+            }, 0);
+
             const html = `<!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
 <meta charset="UTF-8">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: Arial, sans-serif; background: #fff; color: #1a1a2e; padding: 32px; }
-  .header { display: flex; align-items: center; gap: 14px; margin-bottom: 8px; }
-  .logo { font-size: 36px; }
-  .brand { font-size: 32px; font-weight: 900; color: #2D3182; letter-spacing: 4px; }
-  .meta { font-size: 12px; color: #888; margin-bottom: 28px; }
-  .day-block { margin-bottom: 22px; border-radius: 10px; overflow: hidden; border: 1px solid #e0e4f0; }
-  .day-header { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: #2D3182; }
-  .day-block.rest .day-header { background: #6b7280; }
-  .day-name { font-size: 13px; font-weight: 800; color: #fff; letter-spacing: 1px; }
-  .day-tag { font-size: 12px; font-weight: 700; color: rgba(255,255,255,0.75); }
-  .rest-tag { font-style: italic; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  thead tr { background: #f0f2fa; }
-  th { padding: 8px 10px; text-align: left; font-size: 10px; font-weight: 800; color: #6070a0; letter-spacing: 0.5px; text-transform: uppercase; }
-  td { padding: 9px 10px; border-bottom: 1px solid #f0f2fa; }
-  tr:last-child td { border-bottom: none; }
-  tr:nth-child(even) td { background: #fafbff; }
-  .num { width: 32px; color: #9090b0; font-weight: 700; }
-  .ex-name { font-weight: 700; color: #1a1a2e; }
-  .center { text-align: center; font-weight: 700; color: #2D3182; }
+@page { size: A4; margin: 15mm 18mm; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: Arial, sans-serif; color: #1a1a2e; font-size: 10pt; background: #fff; }
+
+.header { display: flex; align-items: flex-end; justify-content: space-between; padding-bottom: 14px; border-bottom: 3px solid #2D3182; margin-bottom: 18px; }
+.brand-wrap { display: flex; align-items: center; gap: 10px; }
+.logo { font-size: 26pt; }
+.brand { font-size: 26pt; font-weight: 900; color: #2D3182; letter-spacing: 5px; }
+.header-right { text-align: right; }
+.prog-name { font-size: 13pt; font-weight: 800; color: #1a1a2e; }
+.prog-date { font-size: 8pt; color: #888; margin-top: 3px; }
+
+.stats-row { display: flex; gap: 12px; margin-bottom: 18px; }
+.stat-box { flex: 1; background: #f0f2fa; border-radius: 8px; padding: 10px 12px; text-align: center; }
+.stat-val { font-size: 16pt; font-weight: 900; color: #2D3182; }
+.stat-lbl { font-size: 7pt; color: #888; font-weight: 700; text-transform: uppercase; letter-spacing: .5px; margin-top: 2px; }
+
+.day-block { margin-bottom: 14px; border-radius: 8px; overflow: hidden; border: 1.5px solid #e0e4f0; page-break-inside: avoid; }
+.day-block.rest { border-color: #e5e7eb; }
+.day-header { display: flex; align-items: center; gap: 10px; padding: 9px 13px; background: #2D3182; }
+.day-block.rest .day-header { background: #9ca3af; }
+.day-name { font-size: 10pt; font-weight: 800; color: #fff; letter-spacing: .5px; }
+.day-label-tag { font-size: 9pt; font-weight: 600; color: rgba(255,255,255,0.8); flex: 1; }
+.day-rest-tag { font-size: 8pt; color: rgba(255,255,255,0.7); font-style: italic; flex: 1; }
+.day-count { font-size: 8pt; color: rgba(255,255,255,0.6); font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-size: 9pt; }
+th { background: #f5f6fb; padding: 6px 8px; text-align: left; font-size: 7.5pt; font-weight: 800; color: #5060a0; text-transform: uppercase; letter-spacing: .4px; }
+td { padding: 7px 8px; border-bottom: 1px solid #f0f2f8; }
+tr.alt td { background: #fafbff; }
+tr:last-child td { border-bottom: none; }
+.td-num { width: 22px; color: #bbb; font-weight: 700; font-size: 8pt; }
+.td-name { font-weight: 700; color: #1a1a2e; }
+.td-center { text-align: center; font-weight: 700; color: #2D3182; }
+.td-inc { text-align: center; font-weight: 700; color: #d97706; font-size: 8pt; }
+.th-num { width: 22px; }
+.th-center { text-align: center; }
+
+.footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid #eef0f8; display: flex; justify-content: space-between; font-size: 8pt; color: #aaa; }
 </style>
 </head>
 <body>
-<div class="header"><span class="logo">⚡</span><span class="brand">FORCE</span></div>
-<p class="meta">Programme · ${program.name || 'Mon programme'} · Exporté le ${new Date().toLocaleDateString('fr-FR')}</p>
+
+<div class="header">
+  <div class="brand-wrap"><span class="logo">⚡</span><span class="brand">FORCE</span></div>
+  <div class="header-right">
+    <div class="prog-name">${(program.name || 'Mon programme').replace(/</g, '&lt;')}</div>
+    <div class="prog-date">Exporté le ${new Date().toLocaleDateString('fr-FR')}</div>
+  </div>
+</div>
+
+<div class="stats-row">
+  <div class="stat-box"><div class="stat-val">${activeDays.length}</div><div class="stat-lbl">Jours d'entraînement</div></div>
+  <div class="stat-box"><div class="stat-val">${restDays.length}</div><div class="stat-lbl">Jours de repos</div></div>
+  <div class="stat-box"><div class="stat-val">${totalExercises}</div><div class="stat-lbl">Exercices au total</div></div>
+</div>
+
 ${dayBlocks}
+
+<div class="footer">
+  <span>⚡ FORCE — Programme d'entraînement</span>
+  <span>${new Date().toLocaleDateString('fr-FR')}</span>
+</div>
+
 </body>
 </html>`;
 
-            const { uri } = await Print.printToFileAsync({ html });
+            const { uri } = await Print.printToFileAsync({ html, base64: false });
             await Sharing.shareAsync(uri, {
                 mimeType: 'application/pdf',
                 UTI: 'com.adobe.pdf',
                 dialogTitle: 'Exporter le programme FORCE',
             });
         } catch (err: any) {
-            Alert.alert('Erreur', err.message);
+            Alert.alert('Erreur export', err.message);
         } finally {
             setExportingPdf(false);
         }
